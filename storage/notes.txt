@@ -1,0 +1,85 @@
+Notes for storage subsystem
+---------------------------
+
+General ideas:
+  - We want to write a snapshot to disk every now and again
+  - This snapshot has to contain an exact copy of the memory at that point
+  - We keep 2 backing files (which contain 2 copies of the data)
+    - One on which the append-only journal(s) can be applied to get to the latest state
+    - One that we are currently writing (or will write the next version of the data).  This file is purposely kept around as most of its pages will already contain the required data (so the entire file doesn't need to be read again).
+  - On exit, the older file can be removed
+  - On entry, the second file can be created in the background as a copy of the first file
+  - When we want to save our state:
+    - Get the old file, expand it to the size that is needed
+    - For each page:
+      - If the page for the old file is the 
+
+
+
+  time
+   |
+   v
+
+   |               
+   a--------------+    a = forked for file -2
+   |              |
+   |              |
+   b---------+         b = forked for file -1
+   |         |
+   |         |
+   |
+   c+----+             c = forked for current dump
+
+ 
+   current state
+
+   How do we know if a page changed between file-2 and current?
+     - Look at the vm page info for file-2 and current; if it's the same then
+       the page doesn't need to be written
+     - If the page was deleted, then it doesn't need to be written
+     - Otherwise, the page needs to be written
+       - If we're writing to the file that was originally mapped, use msync()
+         to do the writing ???
+       - Otherwise, use write()
+
+   It doesn't matter which page was eventually written; 
+
+   Is it possible to make the VM know that the backing store matches the
+   current state?  Then it is free to drop the mapping if it wants (since it
+   knows that the data was already written to disk).
+       - Maybe use mmap() again on the page that was updated?
+
+
+
+Goal: we aim to do the following:
+  - Persistent storage of contiguous data chunks
+  - Only the most recently committed version goes onto disk; any in-fly
+    transactions are in memory (or handled via the page-file)
+  - On a commit:
+    - Current in-memory object updated straight away
+    - Deltas written to an append-only log file
+  - Every once in a while
+    - Wait until a transaction commits to just before the commit lock is
+      released
+    - Process is forked with copy-on-write pages
+      - Parent switches to a new append-only logfile, then releases commit
+        log and continues
+      - Child writes all modified pages out to underlying file
+        - Modified pages are determined using the pagemap/
+  - Reliability via:
+    - Two snapshots (
+    - Base snapshot (memory mapped)
+    - Append-only journal of deltas to be written
+    - Every x time, we 
+
+
+Tools:
+
+We can use the VM subsystem to do most of our work for us.
+
+http://www.mjmwired.net/kernel/Documentation/vm/pagemap.txt
+
+/proc/self/maps: information about where each file is mapped in VM
+/proc/self/pagemap: information about each VM page (64 bits/page)
+/proc/self/kpagecount: number of times each VM page is mapped
+/proc/self/kpageflags: flags about what the VM page is doing
