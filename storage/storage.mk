@@ -3,6 +3,7 @@
 # Copyright (c) 2010 Recoset.  All rights reserved.
 
 STORAGE_SOURCES := \
+	snapshot.cc
 
 STORAGE_LINK :=  boost_date_time-mt
 

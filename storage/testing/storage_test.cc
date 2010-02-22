@@ -25,6 +25,8 @@
 #include <fstream>
 #include <vector>
 
+#include <signal.h>
+
 
 using namespace ML;
 using namespace std;
@@ -132,8 +134,11 @@ struct Page_Info {
 
     std::string print() const
     {
-        return print_mapping() + format("  c:%6d ", count)
-            + print_flags();
+        string result = print_mapping();
+        if (pfn != 0)
+            result = result + format("  c:%6d ", count)
+                + print_flags();
+        return result;
     }
 };
 
