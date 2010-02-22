@@ -43,7 +43,7 @@ struct Snapshot {
     typedef boost::function<int (int)> Worker;
 
     // Create a snapshot of the current process
-    Snapshot(Worker worker);
+    Snapshot(Worker worker = Worker());
     
     // Terminate the snapshot of the current process
     ~Snapshot();
@@ -67,8 +67,9 @@ struct Snapshot {
     // Close the remote file
     void close_file(const Remote_File & file);
 
-    // Dump the given range of (remote) virtual memory into the given file
-    void dump_memory(const Remote_File & file,
+    // Dump the given range of (remote) virtual memory into the given file.
+    // Returns the number of pages written.
+    size_t dump_memory(int fd,
                      size_t file_offset,
                      void * mem_start,
                      size_t mem_size);

@@ -9,12 +9,19 @@
 #define BOOST_TEST_DYN_LINK
 
 #include "jml/utils/string_functions.h"
+#include "jml/utils/file_functions.h"
 #include "jml/arch/exception.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
 #include "recoset/storage/snapshot.h"
 #include <signal.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <errno.h>
 
 
 using namespace ML;
@@ -108,4 +115,96 @@ BOOST_AUTO_TEST_CASE( test_snapshot )
     res = read(s.control_fd(), &buf, 1);
     BOOST_REQUIRE_EQUAL(res, 1);
     BOOST_REQUIRE_EQUAL(buf, 'b');
+
+    BOOST_CHECK_EQUAL(s.terminate(), 0);
+}
+
+const size_t page_size = 4096;
+
+
+struct Backed_Region {
+    Backed_Region(const std::string & filename, size_t size, bool wipe = true)
+    {
+        fd = open(filename.c_str(), (wipe ? (O_CREAT | O_TRUNC) : 0) | O_RDWR,
+                  0666);
+        if (fd == -1)
+            throw Exception("Backed_Region(): open + " + filename + ": "
+                            + string(strerror(errno)));
+
+        size_t sz = get_file_size(fd);
+
+        if (!wipe && sz != size)
+            throw Exception("backing file was wrong size");
+
+        if (sz != size) {
+            int res = ftruncate(fd, size);
+            if (res == -1)
+                throw Exception("truncate didn't work: " + string(strerror(errno)));
+        }            
+
+        void * addr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+
+        if (addr == 0)
+            throw Exception("mmap failed: " + string(strerror(errno)));
+
+        data = (char *)addr;
+        this->size = size;
+    }
+    
+    ~Backed_Region()
+    {
+        munmap(data, size);
+        close(fd);
+    }
+
+    int fd;
+    char * data;
+    size_t size;
+};
+
+void set_page(char * data, int page_offset, const std::string & str)
+{
+    data += page_size * page_offset;
+
+    for (unsigned i = 0;  i < page_size;  ++i) {
+        int j = i % str.length();
+        data[i] = str[j];
+    }
+
+    data[page_size - 1] = 0;
+}
+
+BOOST_AUTO_TEST_CASE( test_backing_file )
+{
+    // 1.  Create two backed regions
+
+    int npages = 5;
+
+    Backed_Region region1("region1", npages * page_size);
+    Backed_Region region2("region2", npages * page_size);
+
+    // 2.  Write to the first one
+    const char * cs1 = "1abcdef\0";
+    string s1(cs1, cs1 + 8);
+    set_page(region1.data, 0, s1);
+    set_page(region1.data, 1, s1);
+    set_page(region1.data, 2, s1);
+    set_page(region1.data, 3, s1);
+    set_page(region1.data, 4, s1);
+    
+    // 3.  Create a snapshot
+    Snapshot snapshot1;
+
+
+    // 4.  Write the snapshot to region1
+    size_t written
+        = snapshot1.dump_memory(region1.fd, 0, region1.data, region1.size);
+    
+    BOOST_CHECK_EQUAL(written, npages * page_size);
+
+    // 5.  Re-map it and check that it gave the correct data
+    Backed_Region region1a("region1", npages * page_size, false);
+
+    BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
+                                  region1a.data, region1a.data + region1a.size);
 }

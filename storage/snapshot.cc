@@ -76,6 +76,9 @@ Snapshot(Worker worker)
 Snapshot::
 ~Snapshot()
 {
+    if (!itl->pid)
+        return;
+
     int return_code = terminate();
 
     if (return_code != 0)
@@ -112,13 +115,18 @@ close_file(const Remote_File & file)
     throw Exception("not done");
 }
 
-void
+size_t
 Snapshot::
-dump_memory(const Remote_File & file,
+dump_memory(int fd,
             size_t file_offset,
             void * mem_start,
             size_t mem_size)
 {
+    // TODO: use mincore() as a first check; those pages that aren't in core
+    // are surely not modified (unless they are swapped out)
+
+    // mincore + /proc/self/pagemap should give us what we want
+
     throw Exception("not done");
 }
 
