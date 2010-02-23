@@ -233,6 +233,7 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
 
 BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
 {
+    // Don't make boost::test think that processes exiting is a problem
     signal(SIGCHLD, SIG_DFL);
 
     int npages = 5;
