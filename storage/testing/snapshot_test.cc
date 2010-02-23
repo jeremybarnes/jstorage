@@ -12,6 +12,7 @@
 #include "jml/utils/file_functions.h"
 #include "jml/utils/info.h"
 #include "jml/arch/exception.h"
+#include "jml/arch/vm.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
@@ -228,6 +229,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
 
 // This test case makes sure that pages that weren't modified in the snapshot
 // from the originally mapped file are not written to disk needlessly
+// TODO: make sure that the number of mappings doesn't explode...
+
 BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
 {
     signal(SIGCHLD, SIG_DFL);
@@ -246,6 +249,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
     set_page(region1.data, 0, s1);
     set_page(region1.data, 2, s1);
     set_page(region1.data, 4, s1);
+
+    dump_page_info(region1.data, region1.data + region1.size);
     
     // 3.  Create a snapshot
     Snapshot snapshot1;

@@ -16,6 +16,7 @@
 #include <signal.h>
 #include "jml/arch/exception.h"
 #include <iostream>
+#include "jml/arch/vm.h"
 
 
 using namespace std;
@@ -320,23 +321,59 @@ client_sync_to_disk()
         size_t       file_offset = recv<size_t>();
         const char * mem_start   = recv<char *>();
         size_t       mem_size    = recv<size_t>();
-        
+
+        cerr << "memory:" << endl;
+        dump_page_info(mem_start, mem_size);
+
         // Now go and do it
         size_t result = 0;
         
         size_t npages = mem_size / page_size;
         
-        off_t res = lseek(fd, file_offset, SEEK_SET);
+        vector<unsigned char> flags
+            = page_flags(mem_start, npages);
+
+        off_t ofs = lseek(fd, file_offset, SEEK_SET);
         
-        if (res != file_offset)
-            throw Exception("lseek failed: " + string(strerror(errno)));
+        if (ofs != file_offset)
+            throw Exception("lseek failed 1: " + string(strerror(errno)));
         
-        for (unsigned i = 0;  i < npages;  ++i, mem_start += page_size) {
+        off_t wanted_ofs = ofs;
+        for (unsigned i = 0;  i < npages;  ++i, mem_start += page_size, wanted_ofs += page_size) {
+            // Look at what the VM subsystem says:
+            // - If the page isn't present or in swapped, then it has never
+            //   been touched and what's already on the disk is the only
+            //   possibility;
+            
+            if (!flags[i]) continue;
+
+            if (ofs != wanted_ofs) {
+                ofs = lseek(fd, wanted_ofs, SEEK_SET);
+        
+                if (ofs != wanted_ofs)
+                    throw Exception("lseek failed 2: "
+                                    + string(strerror(errno)));
+            }
+            
             int res = write(fd, mem_start, page_size);
             if (res != page_size)
                 throw Exception("write != page_size");
+
+            void * addr = mmap((void *)mem_start, page_size,
+                               PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_FIXED, fd,
+                               wanted_ofs);
+
+            if (addr != mem_start)
+                throw Exception("mmap failed: "  + string(strerror(errno)));
+
             result += res;
+            ofs += res;
         }
+
+        cerr << "memory after:" << endl;
+        dump_page_info(mem_start, mem_size);
+
 
         send(result);
     }
