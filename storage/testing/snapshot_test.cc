@@ -180,6 +180,8 @@ void set_page(char * data, int page_offset, const std::string & str)
     data[page_size - 1] = 0;
 }
 
+// This test case tests our ability to create a snapshot and to write an
+// area of memory from that snapshot to disk.
 BOOST_AUTO_TEST_CASE( test_backing_file )
 {
     signal(SIGCHLD, SIG_DFL);
@@ -188,7 +190,7 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
 
     int files_open_before = num_open_files();
 
-    // 1.  Create two backed regions
+    // 1.  Create a backed regions
     Backed_Region region1("region1", npages * page_size);
 
     // 2.  Write to the first one
@@ -208,6 +210,55 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
         = snapshot1.dump_memory(region1.fd, 0, region1.data, region1.size);
     
     BOOST_CHECK_EQUAL(written, npages * page_size);
+
+    // 5.  Re-map it and check that it gave the correct data
+    Backed_Region region1a("region1", npages * page_size, false);
+
+    BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
+                                  region1a.data, region1a.data + region1a.size);
+
+    BOOST_CHECK_EQUAL(snapshot1.terminate(), 0);
+
+    region1.close();
+    region1a.close();
+
+    // Make sure that everything was properly closed
+    BOOST_CHECK_EQUAL(files_open_before, num_open_files());
+}
+
+// This test case makes sure that pages that weren't modified in the snapshot
+// from the originally mapped file are not written to disk needlessly
+BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
+{
+    signal(SIGCHLD, SIG_DFL);
+
+    int npages = 5;
+
+    // So we can make sure that all file descriptors were returned
+    int files_open_before = num_open_files();
+
+    // 1.  Create a backed regions
+    Backed_Region region1("region1", npages * page_size);
+
+    // 2.  Write to 3 of the 5 pages
+    const char * cs1 = "1abcdef\0";
+    string s1(cs1, cs1 + 8);
+    set_page(region1.data, 0, s1);
+    set_page(region1.data, 2, s1);
+    set_page(region1.data, 4, s1);
+    
+    // 3.  Create a snapshot
+    Snapshot snapshot1;
+
+    // 4.  Write the snapshot to region1
+    size_t written
+        = snapshot1.dump_memory(region1.fd, 0, region1.data, region1.size);
+    
+    BOOST_CHECK_EQUAL(written, npages * page_size);
+
+    // 5.  
+
+
 
     // 5.  Re-map it and check that it gave the correct data
     Backed_Region region1a("region1", npages * page_size, false);
