@@ -23,6 +23,8 @@
 
 namespace RS {
 
+enum { page_size = 4096 };
+
 
 /*****************************************************************************/
 /* SNAPSHOT                                                                  */
@@ -50,6 +52,36 @@ struct Snapshot {
 
     int control_fd() const;
 
+    void send_message(const char * data, size_t sz);
+
+    std::string recv_message();
+
+    void recv_message(char * data, size_t sz, bool all_at_once = true);
+
+    template<typename X>
+    void send(const X & x)
+    {
+        send_message((const char *)&x, sizeof(X));
+    }
+
+    void send(const std::string & str);
+
+    template<typename X>
+    void recv(X & x)
+    {
+        recv_message((char *)&x, sizeof(X));
+    }
+
+    void recv(std::string & str);
+
+    template<typename X>
+    X recv()
+    {
+        X result;
+        recv(result);
+        return result;
+    }
+
     // Return a snapshot object that represents the current process, but
     // operates in a different thread.
     static Snapshot & current();
@@ -70,9 +102,9 @@ struct Snapshot {
     // Dump the given range of (remote) virtual memory into the given file.
     // Returns the number of pages written.
     size_t dump_memory(int fd,
-                     size_t file_offset,
-                     void * mem_start,
-                     size_t mem_size);
+                       size_t file_offset,
+                       void * mem_start,
+                       size_t mem_size);
     
     // Dump the pages of memory that have changed between the other snapshot
     // and this snapshot to the given file.  Used to update a snapshot file
@@ -122,6 +154,9 @@ struct Snapshot {
 private:
     // Run the default function for the child process
     int run_child(int control_fd);
+
+    // Client process for the dump memory command
+    void client_dump_memory();
 
     struct Itl;
     boost::scoped_ptr<Itl> itl;

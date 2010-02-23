@@ -10,6 +10,7 @@
 
 #include "jml/utils/string_functions.h"
 #include "jml/utils/file_functions.h"
+#include "jml/utils/info.h"
 #include "jml/arch/exception.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
@@ -119,9 +120,6 @@ BOOST_AUTO_TEST_CASE( test_snapshot )
     BOOST_CHECK_EQUAL(s.terminate(), 0);
 }
 
-const size_t page_size = 4096;
-
-
 struct Backed_Region {
     Backed_Region(const std::string & filename, size_t size, bool wipe = true)
     {
@@ -150,11 +148,19 @@ struct Backed_Region {
         data = (char *)addr;
         this->size = size;
     }
+
+    void close()
+    {
+        if (data) munmap(data, size);
+        data = 0;
+        if (fd != -1) ::close(fd);
+        fd = -1;
+        size = 0;
+    }
     
     ~Backed_Region()
     {
-        munmap(data, size);
-        close(fd);
+        close();
     }
 
     int fd;
@@ -176,12 +182,14 @@ void set_page(char * data, int page_offset, const std::string & str)
 
 BOOST_AUTO_TEST_CASE( test_backing_file )
 {
-    // 1.  Create two backed regions
+    signal(SIGCHLD, SIG_DFL);
 
     int npages = 5;
 
+    int files_open_before = num_open_files();
+
+    // 1.  Create two backed regions
     Backed_Region region1("region1", npages * page_size);
-    Backed_Region region2("region2", npages * page_size);
 
     // 2.  Write to the first one
     const char * cs1 = "1abcdef\0";
@@ -195,7 +203,6 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
     // 3.  Create a snapshot
     Snapshot snapshot1;
 
-
     // 4.  Write the snapshot to region1
     size_t written
         = snapshot1.dump_memory(region1.fd, 0, region1.data, region1.size);
@@ -207,4 +214,12 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
 
     BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
                                   region1a.data, region1a.data + region1a.size);
+
+    BOOST_CHECK_EQUAL(snapshot1.terminate(), 0);
+
+    region1.close();
+    region1a.close();
+
+    // Make sure that everything was properly closed
+    BOOST_CHECK_EQUAL(files_open_before, num_open_files());
 }
