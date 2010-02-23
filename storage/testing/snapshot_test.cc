@@ -250,15 +250,30 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
     // 3.  Create a snapshot
     Snapshot snapshot1;
 
-    // 4.  Write the snapshot to region1
+    // 4.  Sync changed pages to region1
     size_t written
-        = snapshot1.dump_memory(region1.fd, 0, region1.data, region1.size);
+        = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size);
     
-    BOOST_CHECK_EQUAL(written, npages * page_size);
+    BOOST_CHECK_EQUAL(written, 3 * page_size);
 
-    // 5.  
+    // 5.  Check that nothing is synced a second time
+    written = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size);
+    
+    BOOST_CHECK_EQUAL(written, 0);
 
+    BOOST_CHECK_EQUAL(snapshot1.terminate(), 0);
 
+    set_page(region1.data, 1, s1);
+
+    Snapshot snapshot2;
+
+    written = snapshot2.sync_to_disk(region1.fd, 0, region1.data, region1.size);
+    
+    BOOST_CHECK_EQUAL(written, (int)page_size);
+
+    written = snapshot2.sync_to_disk(region1.fd, 0, region1.data, region1.size);
+
+    BOOST_CHECK_EQUAL(written, 0);
 
     // 5.  Re-map it and check that it gave the correct data
     Backed_Region region1a("region1", npages * page_size, false);
@@ -266,7 +281,7 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
     BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
                                   region1a.data, region1a.data + region1a.size);
 
-    BOOST_CHECK_EQUAL(snapshot1.terminate(), 0);
+    BOOST_CHECK_EQUAL(snapshot2.terminate(), 0);
 
     region1.close();
     region1a.close();

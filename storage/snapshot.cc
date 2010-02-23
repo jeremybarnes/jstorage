@@ -268,6 +268,92 @@ client_dump_memory()
     }
 }
 
+size_t
+Snapshot::
+sync_to_disk(int fd,
+             size_t file_offset,
+             void * mem_start,
+             size_t mem_size)
+{
+    // TODO: copy and pasted
+
+    if (file_offset % page_size != 0)
+        throw Exception("file offset not on a page boundary");
+
+    size_t mem = (size_t)mem_start;
+    if (mem % page_size != 0)
+        throw Exception("mem_start not on a page boundary");
+
+    if (mem_size % page_size != 0)
+        throw Exception("mem_size not a multiple of page_size");
+
+    off_t res = lseek(fd, file_offset, SEEK_SET);
+
+    if (res != file_offset)
+        throw Exception("lseek failed: " + string(strerror(errno)));
+
+    send('s');
+
+    send(fd);
+    send(file_offset);
+    send(mem_start);
+    send(mem_size);
+
+    ssize_t result = recv<size_t>();
+    
+    if (result == -1) {
+        string error = recv_message();
+        
+        throw Exception("sync_to_disk(): snapshot process returned error: "
+                        + error);
+    }
+        
+    return result;
+}
+
+void
+Snapshot::
+client_sync_to_disk()
+{
+    try {
+        int          fd          = recv<int>();
+        size_t       file_offset = recv<size_t>();
+        const char * mem_start   = recv<char *>();
+        size_t       mem_size    = recv<size_t>();
+        
+        // Now go and do it
+        size_t result = 0;
+        
+        size_t npages = mem_size / page_size;
+        
+        off_t res = lseek(fd, file_offset, SEEK_SET);
+        
+        if (res != file_offset)
+            throw Exception("lseek failed: " + string(strerror(errno)));
+        
+        for (unsigned i = 0;  i < npages;  ++i, mem_start += page_size) {
+            int res = write(fd, mem_start, page_size);
+            if (res != page_size)
+                throw Exception("write != page_size");
+            result += res;
+        }
+
+        send(result);
+    }
+    catch (const std::exception & exc) {
+        ssize_t result = -1;
+        send(result);
+        std::string message = exc.what();
+        send(message);
+    }
+    catch (...) {
+        ssize_t result = -1;
+        send(result);
+        std::string message = "unknown exception caught";
+        send(message);
+    }
+}
+
 void
 Snapshot::
 sync_memory(const Remote_File & file,
@@ -334,9 +420,10 @@ run_child(int control_fd)
             return -1;
         }
 
-        if (c == 'd') {
+        if (c == 'd')
             client_dump_memory();
-        }
+        else if (c == 's')
+            client_sync_to_disk();
         else {
             cerr << "Snapshot: child got unknown command "
                  << c << endl;

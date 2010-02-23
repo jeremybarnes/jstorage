@@ -106,6 +106,18 @@ struct Snapshot {
                        void * mem_start,
                        size_t mem_size);
     
+    // Sync pages from a copy-on-write mapping that have been modified in
+    // the snapshot to the disk.  At the same time, it will re-map them
+    // into the snapshot process.
+    //
+    // Returns the number of pages written, which will be less than or equal
+    // to mem_size (less if there were pages that didn't need to be written
+    // as they were already clean).
+    size_t sync_to_disk(int fd,
+                        size_t file_offset,
+                        void * mem_start,
+                        size_t mem_size);
+    
     // Dump the pages of memory that have changed between the other snapshot
     // and this snapshot to the given file.  Used to update a snapshot file
     // by writing out only the pages that have been modified.
@@ -157,6 +169,9 @@ private:
 
     // Client process for the dump memory command
     void client_dump_memory();
+
+    // Client process for the sync_to_disk command
+    void client_sync_to_disk();
 
     struct Itl;
     boost::scoped_ptr<Itl> itl;
