@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <signal.h>
 #include "jml/arch/exception.h"
+#include "jml/utils/string_functions.h"
 #include <iostream>
 #include "jml/arch/vm.h"
 
@@ -31,8 +32,14 @@ namespace RS {
 /*****************************************************************************/
 
 struct Snapshot::Itl {
+    Itl()
+        : pid(-1), control_fd(-1), snapshot_pm_fd(-1)
+    {
+    }
+
     pid_t pid;
     int control_fd;
+    int snapshot_pm_fd;
 };
 
 Snapshot::
@@ -81,6 +88,12 @@ Snapshot(Worker worker)
 
     itl->pid = pid;
     itl->control_fd = sockets[1];
+
+    int pm_fd = open(format("/proc/%d/pagemap", pid).c_str(), O_RDONLY);
+    if (pm_fd == -1)
+        throw Exception("open pagemap; " + string(strerror(errno)));
+
+    itl->snapshot_pm_fd = pm_fd;
 }
 
 Snapshot::
@@ -412,6 +425,11 @@ terminate()
         throw Exception("Snapshot::terminate(): already terminated");
 
     int res = close(itl->control_fd);
+    if (res == -1)
+        cerr << "warning: Snapshot::terminate(): close returned "
+             << strerror(errno) << endl;
+
+    res = close(itl->snapshot_pm_fd);
     if (res == -1)
         cerr << "warning: Snapshot::terminate(): close returned "
              << strerror(errno) << endl;
