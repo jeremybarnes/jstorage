@@ -11,13 +11,12 @@
 #include "jml/utils/string_functions.h"
 #include "jml/utils/file_functions.h"
 #include "jml/utils/info.h"
-#include "jml/arch/exception.h"
-#include "jml/arch/vm.h"
 #include "jml/arch/atomic_ops.h"
+#include "jml/arch/vm.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
-#include "recoset/storage/snapshot.h"
+#include "recoset/storage/sigsegv.h"
 #include <signal.h>
 
 #include <sys/types.h>
@@ -30,8 +29,6 @@
 #include <boost/bind.hpp>
 #include <fstream>
 #include <vector>
-
-#include <ace/Synch.h>
 
 #include <boost/thread.hpp>
 #include <boost/thread/barrier.hpp>
@@ -110,164 +107,6 @@ BOOST_AUTO_TEST_CASE ( test1_segv_restart )
     BOOST_CHECK_EQUAL(num_handled, 1);
 }
 
-struct Spinlock {
-    Spinlock()
-        : value(0)
-    {
-    }
-
-    int acquire()
-    {
-        for (int tries = 0; true;  ++tries) {
-            if (__sync_bool_compare_and_swap(&value, 0, 1))
-                return 0;
-            if (tries == 100) {
-                tries = 0;
-                sched_yield();
-            }
-        }
-    }
-
-    int release()
-    {
-        __sync_lock_release(&value);
-        return 0;
-    }
-
-    volatile int value;
-};
-
-struct Segv_Descriptor {
-    Segv_Descriptor()
-        : active(false), ref(0), start(0), end(0)
-    {
-    }
-
-    bool matches(const void * addr) const
-    {
-        if (!active || ref == 0)
-            return false;
-        const char * addr2 = (const char *)addr;
-
-        return addr2 >= start && addr2 < end;
-    }
-
-    volatile bool active;
-    volatile int ref;
-    const char * start;
-    const char * end;
-};
-
-
-enum { NUM_SEGV_DESCRIPTORS = 64 };
-
-Segv_Descriptor SEGV_DESCRIPTORS[NUM_SEGV_DESCRIPTORS];
-
-Spinlock segv_lock;
-
-size_t num_faults_handled = 0;
-
-int register_segv_region(const void * start, const void * end)
-{
-    ACE_Guard<Spinlock> guard(segv_lock);
-    
-    // Busy wait until we get one
-    int idx = -1;
-    while (idx == -1) {
-        for (unsigned i = 0;  i < NUM_SEGV_DESCRIPTORS && idx == -1;  ++i)
-            if (SEGV_DESCRIPTORS[i].ref == 0) idx = i;
-        
-        if (idx == -1) sched_yield();
-    }
-
-    Segv_Descriptor & descriptor = SEGV_DESCRIPTORS[idx];
-    descriptor.start  = (const char *)start;
-    descriptor.end    = (const char *)end;
-    descriptor.active = true;
-
-    memory_barrier();
-
-    descriptor.ref = 1;
-
-    return idx;
-}
-
-void unregister_segv_region(int region)
-{
-    ACE_Guard<Spinlock> guard(segv_lock);
-
-    if (region < 0 || region >= NUM_SEGV_DESCRIPTORS)
-        throw Exception("unregister_segv_region(): invalid region");
-
-    Segv_Descriptor & descriptor = SEGV_DESCRIPTORS[region];
-    
-    if (descriptor.ref == 0 || !descriptor.active)
-        throw Exception("segv region is not active");
-    
-    descriptor.active = false;
-    descriptor.start = 0;
-    descriptor.end = 0;
-
-    memory_barrier();
-
-    atomic_add(descriptor.ref, -1);
-}
-
-void segv_handler(int signum, siginfo_t * info, void * context)
-{
-    if (signum != SIGSEGV) raise(signum);
-
-    // We could do various things here to filter out the signal
-
-    //ucontext_t * ucontext = (ucontext_t *)context;
-
-    const char * addr = (const char *)info->si_addr;
-
-    int region = -1;
-    {
-        ACE_Guard<Spinlock> guard(segv_lock);
-
-        for (unsigned i = 0;  i < NUM_SEGV_DESCRIPTORS && region == -1;  ++i) {
-            if (SEGV_DESCRIPTORS[i].matches(addr)) {
-                region = i;
-                atomic_add(SEGV_DESCRIPTORS[i].ref, 1);
-            }
-        }
-    }
-
-    if (region == -1) raise(signum);
-
-    Segv_Descriptor & descriptor = SEGV_DESCRIPTORS[region];
-
-    // busy wait for it to become inactive
-    //timespec zero_point_one_ms = {0, 100000};
-
-    // TODO: should we call nanosleep in a signal handler?
-    // NOTE: doesn't do the right thing in linux 2.4; small nanosleeps are busy
-    // waits
-
-    while (descriptor.active) {
-        //nanosleep(&zero_point_one_ms, 0);
-    }
-
-    atomic_add(descriptor.ref, -1);
-    atomic_add(num_faults_handled, 1);
-}
-
-void install_segv_handler()
-{
-    // Install a segv handler
-    struct sigaction action;
-
-    action.sa_sigaction = segv_handler;
-    action.sa_flags = SA_SIGINFO;
-
-    int res = sigaction(SIGSEGV, &action, 0);
-
-    if (res == -1)
-        throw Exception(errno, "install_segv_handler()", "sigaction");
-}
-
 void test2_segv_handler_thread(char * addr)
 {
     *addr = 'x';
@@ -305,7 +144,7 @@ BOOST_AUTO_TEST_CASE ( test2_segv_handler )
 
     BOOST_CHECK_EQUAL(*addr, 'x');
 
-    BOOST_CHECK_EQUAL(num_faults_handled, 1);
+    BOOST_CHECK_EQUAL(get_num_segv_faults_handled(), 1);
 }
 
 // Thread to continually modify the memory
@@ -401,9 +240,9 @@ BOOST_AUTO_TEST_CASE ( test2_segv_handler_stress )
         for (unsigned j = 0;  j < page_size / sizeof(int);  ++j)
             BOOST_CHECK_EQUAL(addr[i * page_size / sizeof(int) + j], val);
 
-    cerr << num_faults_handled << " segv faults handled" << endl;
+    cerr << get_num_segv_faults_handled() << " segv faults handled" << endl;
 
-    BOOST_CHECK(num_faults_handled > 1);
+    BOOST_CHECK(get_num_segv_faults_handled() > 1);
 }
 
 
