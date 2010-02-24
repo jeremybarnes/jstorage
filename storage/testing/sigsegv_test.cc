@@ -33,6 +33,8 @@
 
 #include <ace/Synch.h>
 
+#include <boost/thread.hpp>
+
 
 using namespace ML;
 using namespace RS;
@@ -69,7 +71,7 @@ BOOST_AUTO_TEST_CASE ( test1_segv_restart )
     mmap_addr = mmap(0, page_size, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS,
                        -1, 0);
 
-    BOOST_REQUIRE(mmap_addr != 0);
+    BOOST_REQUIRE(mmap_addr != MAP_FAILED);
 
     // Install a segv handler
     struct sigaction action;
@@ -107,27 +109,6 @@ BOOST_AUTO_TEST_CASE ( test1_segv_restart )
     BOOST_CHECK_EQUAL(num_handled, 1);
 }
 
-struct Segv_Descriptor {
-    Segv_Descriptor()
-        : active(false), ref(0), start(0), end(0)
-    {
-    }
-
-    bool matches(const void * addr) const
-    {
-        if (!active || ref == 0)
-            return false;
-        const char * addr2 = (const char *)addr;
-
-        return addr2 >= start && addr2 < end;
-    }
-
-    volatile bool active;
-    volatile int ref;
-    const char * start;
-    const char * end;
-};
-
 struct Spinlock {
     Spinlock()
         : value(0)
@@ -155,12 +136,35 @@ struct Spinlock {
     volatile int value;
 };
 
+struct Segv_Descriptor {
+    Segv_Descriptor()
+        : active(false), ref(0), start(0), end(0)
+    {
+    }
+
+    bool matches(const void * addr) const
+    {
+        if (!active || ref == 0)
+            return false;
+        const char * addr2 = (const char *)addr;
+
+        return addr2 >= start && addr2 < end;
+    }
+
+    volatile bool active;
+    volatile int ref;
+    const char * start;
+    const char * end;
+};
+
 
 enum { NUM_SEGV_DESCRIPTORS = 64 };
 
 Segv_Descriptor SEGV_DESCRIPTORS[NUM_SEGV_DESCRIPTORS];
 
 Spinlock segv_lock;
+
+size_t num_faults_handled = 0;
 
 int register_segv_region(const void * start, const void * end)
 {
@@ -244,6 +248,7 @@ void segv_handler(int signum, siginfo_t * info, void * context)
     }
 
     atomic_add(descriptor.ref, -1);
+    atomic_add(num_faults_handled, 1);
 }
 
 void install_segv_handler()
@@ -251,14 +256,55 @@ void install_segv_handler()
     // Install a segv handler
     struct sigaction action;
 
-    action.sa_sigaction = test1_segv_handler;
-    action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    action.sa_sigaction = segv_handler;
+    action.sa_flags = SA_SIGINFO;
 
     int res = sigaction(SIGSEGV, &action, 0);
 
     if (res == -1)
         throw Exception(errno, "install_segv_handler()", "sigaction");
 }
+
+void test2_segv_handler_thread(char * addr)
+{
+    *addr = 'x';
+}
+
+BOOST_AUTO_TEST_CASE ( test2_segv_handler )
+{
+    // Create a memory mapped page, read only
+    void * vaddr = mmap(0, page_size, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS,
+                       -1, 0);
+    
+    char * addr = (char *)vaddr;
+
+    BOOST_REQUIRE(addr != MAP_FAILED);
+
+    install_segv_handler();
+
+    int region = register_segv_region(addr, addr + page_size);
+
+    int nthreads = 1;
+
+    boost::thread_group tg;
+    for (unsigned i = 0;  i < nthreads;  ++i)
+        tg.create_thread(boost::bind(&test2_segv_handler_thread, addr));
+
+    sleep(1);
+
+    int res = mprotect(vaddr, page_size, PROT_READ | PROT_WRITE);
+
+    BOOST_CHECK_EQUAL(res, 0);
+
+    unregister_segv_region(region);
+
+    tg.join_all();
+
+    BOOST_CHECK_EQUAL(*addr, 'x');
+
+    BOOST_CHECK_EQUAL(num_faults_handled, 1);
+}
+
 
 bool needs_backing(const Pagemap_Entry & current_pagemap,
                    const Pagemap_Entry & old_pagemap)
