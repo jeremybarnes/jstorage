@@ -13,6 +13,7 @@
 #include "jml/utils/info.h"
 #include "jml/arch/exception.h"
 #include "jml/arch/vm.h"
+#include "jml/arch/atomic_ops.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
@@ -29,6 +30,8 @@
 #include <boost/bind.hpp>
 #include <fstream>
 #include <vector>
+
+#include <ace/Synch.h>
 
 
 using namespace ML;
@@ -104,44 +107,167 @@ BOOST_AUTO_TEST_CASE ( test1_segv_restart )
     BOOST_CHECK_EQUAL(num_handled, 1);
 }
 
-struct Pagemap_Reader {
-    // Set up and read the pagemap file for the given memory region.  If
-    // entries is passed in, that will be used as the temporary buffer.
-    Pagemap_Reader(int fd, const char * mem, size_t npages,
-                   Pagemap_Entry * entries = 0);
-
-    // Re-read the entries for the given address range in case they have
-    // changed.  Returns the number that have changed.
-    size_t update(const char * addr, size_t npages)
+struct Segv_Descriptor {
+    Segv_Descriptor()
+        : active(false), ref(0), start(0), end(0)
     {
     }
 
-    // Return the entry for the given address
-    const Pagemap_Entry & operator [] (const char * mem) const
+    bool matches(const void * addr) const
     {
-        size_t page_num = (mem - this->mem) / page_size;
+        if (!active || ref == 0)
+            return false;
+        const char * addr2 = (const char *)addr;
+
+        return addr2 >= start && addr2 < end;
     }
 
-    // Return the entry given an index from zero to npages
-    const Pagemap_Entry & operator [] (size_t page_index) const
-    {
-        if (page_index > npages)
-            throw Exception("Pagemap_Reader::operator [](): bad page index");
-        return entries[page_index];
-    }
-
-private:
-    int fd;
-    const char * mem;
-    size_t npages;
-    Pagemap_Entry * entries;
-    bool delete_entries;
+    volatile bool active;
+    volatile int ref;
+    const char * start;
+    const char * end;
 };
 
-void check_and_reback(char * mem, int start, int end)
+struct Spinlock {
+    Spinlock()
+        : value(0)
+    {
+    }
+
+    int acquire()
+    {
+        for (int tries = 0; true;  ++tries) {
+            if (__sync_bool_compare_and_swap(&value, 0, 1))
+                return 0;
+            if (tries == 100) {
+                tries = 0;
+                sched_yield();
+            }
+        }
+    }
+
+    int release()
+    {
+        __sync_lock_release(&value);
+        return 0;
+    }
+
+    volatile int value;
+};
+
+
+enum { NUM_SEGV_DESCRIPTORS = 64 };
+
+Segv_Descriptor SEGV_DESCRIPTORS[NUM_SEGV_DESCRIPTORS];
+
+Spinlock segv_lock;
+
+int register_segv_region(const void * start, const void * end)
 {
+    ACE_Guard<Spinlock> guard(segv_lock);
+    
+    // Busy wait until we get one
+    int idx = -1;
+    while (idx == -1) {
+        for (unsigned i = 0;  i < NUM_SEGV_DESCRIPTORS && idx == -1;  ++i)
+            if (SEGV_DESCRIPTORS[i].ref == 0) idx = i;
+        
+        if (idx == -1) sched_yield();
+    }
+
+    Segv_Descriptor & descriptor = SEGV_DESCRIPTORS[idx];
+    descriptor.start  = (const char *)start;
+    descriptor.end    = (const char *)end;
+    descriptor.active = true;
+
+    memory_barrier();
+
+    descriptor.ref = 1;
+
+    return idx;
 }
 
+void unregister_segv_region(int region)
+{
+    ACE_Guard<Spinlock> guard(segv_lock);
+
+    if (region < 0 || region >= NUM_SEGV_DESCRIPTORS)
+        throw Exception("unregister_segv_region(): invalid region");
+
+    Segv_Descriptor & descriptor = SEGV_DESCRIPTORS[region];
+    
+    if (descriptor.ref == 0 || !descriptor.active)
+        throw Exception("segv region is not active");
+    
+    descriptor.active = false;
+
+    memory_barrier();
+
+    atomic_add(descriptor.ref, -1);
+}
+
+void segv_handler(int signum, siginfo_t * info, void * context)
+{
+    if (signum != SIGSEGV) raise(signum);
+
+    // We could do various things here to filter out the signal
+
+    //ucontext_t * ucontext = (ucontext_t *)context;
+
+    const char * addr = (const char *)info->si_addr;
+
+    int region = -1;
+    {
+        ACE_Guard<Spinlock> guard(segv_lock);
+
+        for (unsigned i = 0;  i < NUM_SEGV_DESCRIPTORS && region == -1;  ++i) {
+            if (SEGV_DESCRIPTORS[i].matches(addr)) {
+                region = i;
+                atomic_add(SEGV_DESCRIPTORS[i].ref, 1);
+            }
+        }
+    }
+
+    if (region == -1) raise(signum);
+
+    Segv_Descriptor & descriptor = SEGV_DESCRIPTORS[region];
+
+    // busy wait for it to become inactive
+    timespec zero_point_one_ms = {0, 100000};
+
+    // TODO: should we call nanosleep in a signal handler?
+    // NOTE: doesn't do the right thing in linux 2.4; small nanosleeps are busy
+    // waits
+
+    while (descriptor.active) {
+        nanosleep(&zero_point_one_ms, 0);
+    }
+
+    atomic_add(descriptor.ref, -1);
+}
+
+void install_segv_handler()
+{
+    // Install a segv handler
+    struct sigaction action;
+
+    action.sa_sigaction = test1_segv_handler;
+    action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+
+    int res = sigaction(SIGSEGV, &action, 0);
+
+    if (res == -1)
+        throw Exception(errno, "install_segv_handler()", "sigaction");
+}
+
+bool needs_backing(const Pagemap_Entry & current_pagemap,
+                   const Pagemap_Entry & old_pagemap)
+{
+    return current_pagemap.present
+        && old_pagemap.present
+        && current_pagemap.swapped == old_pagemap.swapped
+        && current_pagemap.pfn == old_pagemap.pfn;
+}
 
 /** Make the VM subsystem know that modified pages in a MAP_PRIVATE mmap
     segment have now been written to disk and so the private copy can be
@@ -189,7 +315,7 @@ void check_and_reback(char * mem, int start, int end)
     Of course, to do this we need to make sure that all threads that start up
     handle sigsegv.
 */
-   
+
 void reback_range_after_write(void * memory, size_t length,
                               int backing_file_fd,
                               size_t backing_file_offset,
@@ -210,35 +336,15 @@ void reback_range_after_write(void * memory, size_t length,
     Pagemap_Entry current_pagemap[CHUNK];
     Pagemap_Entry old_pagemap[CHUNK];
 
-    uint64_t page_num = (size_t)memory / page_size;
-
-    int res = lseek(old_pagemap_file, page_size * page_num, SEEK_SET);
-    if (res == -1)
-        throw Exception(errno, "reback_range_after_write()",
-                        "lseek on old_pagemap_file");
-    
-    res = lseek(current_pagemap_file, page_size * page_num, SEEK_SET);
-    if (res == -1)
-        throw Exception(errno, "reback_range_after_write()",
-                        "lseek on current_pagemap_file");
-
     char * mem = (char *)memory;
 
     for (unsigned i = 0;  i < npages;  i += CHUNK, mem += CHUNK * page_size) {
         int todo = std::min(npages - i, CHUNK);
-        
-        // Get the pagemap info for the range in the old process
-        res = read(old_pagemap_file, old_pagemap, todo * sizeof(Pagemap_Entry));
-        if (res == -1)
-            throw Exception(errno, "reback_range_after_write()",
-                            "read on old_pagemap_file");
-        
-        // Get the pagemap info for the range in the new process
-        res = read(current_pagemap_file, current_pagemap,
-                   todo * sizeof(Pagemap_Entry));
-        if (res == -1)
-            throw Exception(errno, "reback_range_after_write()",
-                            "read on old_pagemap_file");
+
+        Pagemap_Reader pm_old(mem, todo * page_size, old_pagemap,
+                              old_pagemap_file);
+        Pagemap_Reader pm_current(mem, todo * page_size, current_pagemap,
+                                  current_pagemap_file);
         
         // The value of j at which we start backing pages
         int backing_start = -1;
@@ -246,11 +352,7 @@ void reback_range_after_write(void * memory, size_t length,
         // Now go through and back those pages needed
         for (unsigned j = 0;  j <= todo;  ++j) {  /* <= for last page */
             bool need_backing
-                =  j < todo
-                && current_pagemap[j].present
-                && old_pagemap[j].present
-                && current_pagemap.swapped == old_pagemap.swapped
-                && current_pagemap[j].pfn == old_pagemap[j].pfn;
+                =  j < todo && needs_backing(current_pagemap[j], old_pagemap[j]);
 
             if (backing_start != -1 && !need_backing) {
                 // We need to re-map the pages from backing_start to
@@ -270,18 +372,21 @@ void reback_range_after_write(void * memory, size_t length,
                 // By coalescing, we could reduce our 3 mprotect calls and
                 // 3 mmap calls into one of each.
 
-                int backing_end = j - 1;
+                int backing_end = j;
 
-                int npages = j - 1;
+                int npages = backing_end - backing_start;
                 char * start = mem + backing_start * page_size;
                 size_t len   = npages * page_size;
-
-                
 
                 // 1.  Add this read-only region to the SIGSEGV handler's list
                 // of active regions
 
-                register_segv_region(start, len);
+                int region = register_segv_region(start, start + len);
+
+                // Make sure that the segv region will be removed once we exit
+                // this scope
+                Call_Guard segv_unregister_guard
+                    (boost::bind(unregister_segv_region, region));
 
                 // 2.  Call mprotect() to switch to read-only
                 int res = mprotect(start, len, PROT_READ);
@@ -289,32 +394,63 @@ void reback_range_after_write(void * memory, size_t length,
                     throw Exception(errno, "reback_range_after_write()",
                                     "mprotect() read-only before switch");
 
-                uint64_t page_num = (size_t)start / page_size;
-
-                // 3.  Update the pagemap entries for the current process
-                res = lseek(current_pagemap_file, page_num * sizeof(Pagemap_Entry), SEEK_SET);
-                if (res == -1)
-                    throw Exception(errno, "reback_range_after_write()",
-                                    "lseek on current_pagemap_file after read");
+                // Make sure that an exception will cause the memory to be
+                // un-protected.
+                Call_Guard mprotect_guard(boost::bind(mprotect, start, len,
+                                                      PROT_READ | PROT_WRITE));
                 
+                // 3.  Re-scan the page map as entries may have changed
+                size_t num_changed = pm_current.update();
 
                 // TODO: what about exceptions from here onwards?
                 
-                // 3.  Scan again through our pages, since some of them might
-                //     have changed since we last scanned.
+                // 4.  Scan again and break into chunks
                 
                 int backing_start2 = -1;
                 for (unsigned k = backing_start;  k <= backing_end;  ++k) {
                     bool need_backing2
-                        =  j < backing_end
-                        && current_pagemap[k].present
-                        && old_pagemap[k].present
-                        && current_pagemap.swapped == old_pagemap.swapped
-                        && current_pagemap[k].pfn == old_pagemap[k].pfn;
+                        =  k < backing_end
+                        && needs_backing(current_pagemap[k], old_pagemap[k]);
                     
+                    if (backing_start2 != -1 && !need_backing2) {
+                        // We need to re-map the file behind backing_start2
+                        // to k
+                        int backing_end2 = k;
+                        
+                        int npages = backing_end2 - backing_start2;
+                        char * start = mem + backing_start2 * page_size;
+                        size_t len   = npages * page_size;
+
+                        off_t foffset
+                            = backing_file_offset + backing_start2 * page_size;
+                        
+                        void * addr = mmap(start, len,
+                                           PROT_READ | PROT_WRITE,
+                                           MAP_PRIVATE | MAP_FIXED,
+                                           backing_file_fd, foffset);
+
+                        if (addr != start)
+                            throw Exception(errno, "reback_range_after_write()",
+                                            "mmap backing file");
+
+                        backing_start2 = -1;
+                    }
+
+                    if (need_backing2 && backing_start2 == -1)
+                        backing_start2 = k;
+                }
+                
+                // If no entries were changed when we updated the pagemaps
+                // then we just unprotected all of the memory so we can
+                // clear the cleanup
+                if (num_changed == 0)
+                    mprotect_guard.clear();
+
+                backing_start = -1;
             }
+
+            if (need_backing && backing_start == -1)
+                backing_start = j;
         }
     }
-
-    
 }
