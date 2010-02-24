@@ -34,6 +34,7 @@
 #include <ace/Synch.h>
 
 #include <boost/thread.hpp>
+#include <boost/thread/barrier.hpp>
 
 
 using namespace ML;
@@ -204,6 +205,8 @@ void unregister_segv_region(int region)
         throw Exception("segv region is not active");
     
     descriptor.active = false;
+    descriptor.start = 0;
+    descriptor.end = 0;
 
     memory_barrier();
 
@@ -237,14 +240,14 @@ void segv_handler(int signum, siginfo_t * info, void * context)
     Segv_Descriptor & descriptor = SEGV_DESCRIPTORS[region];
 
     // busy wait for it to become inactive
-    timespec zero_point_one_ms = {0, 100000};
+    //timespec zero_point_one_ms = {0, 100000};
 
     // TODO: should we call nanosleep in a signal handler?
     // NOTE: doesn't do the right thing in linux 2.4; small nanosleeps are busy
     // waits
 
     while (descriptor.active) {
-        nanosleep(&zero_point_one_ms, 0);
+        //nanosleep(&zero_point_one_ms, 0);
     }
 
     atomic_add(descriptor.ref, -1);
@@ -303,6 +306,104 @@ BOOST_AUTO_TEST_CASE ( test2_segv_handler )
     BOOST_CHECK_EQUAL(*addr, 'x');
 
     BOOST_CHECK_EQUAL(num_faults_handled, 1);
+}
+
+// Thread to continually modify the memory
+void test2_segv_handler_stress_thread1(int * addr,
+                                       int npages,
+                                       boost::barrier & barrier,
+                                       volatile bool & finished)
+{
+    barrier.wait();
+
+    cerr << "m";
+
+    int * end = addr + npages * page_size / sizeof(int);
+
+    while (!finished) {
+        for (int * p = addr;  p != end;  ++p)
+            atomic_add(*p, 1);
+        memory_barrier();
+    }
+
+    cerr << "M";
+}
+
+// Thread to continually unmap and remap the memory
+void test2_segv_handler_stress_thread2(int * addr,
+                                       boost::barrier & barrier,
+                                       volatile bool & finished)
+{
+    barrier.wait();
+
+    cerr << "p";
+
+    while (!finished) {
+        int region = register_segv_region(addr, addr + page_size);
+        mprotect(addr, page_size, PROT_READ);
+        mprotect(addr, page_size, PROT_READ | PROT_WRITE);
+        unregister_segv_region(region);
+    }
+
+    cerr << "P";
+}
+
+BOOST_AUTO_TEST_CASE ( test2_segv_handler_stress )
+{
+    int npages = 8;
+
+    // Create a memory mapped page, read only
+    void * vaddr = mmap(0, npages * page_size, PROT_WRITE | PROT_READ,
+                        MAP_PRIVATE | MAP_ANONYMOUS,
+                       -1, 0);
+    
+    int * addr = (int *)vaddr;
+
+    BOOST_REQUIRE(addr != MAP_FAILED);
+
+    install_segv_handler();
+
+    // 8 threads simultaneously causing faults, with 8 threads writing to
+    // pages
+
+    int nthreads = 8;
+
+    volatile bool finished = false;
+
+    boost::barrier barrier(nthreads + npages);
+
+    boost::thread_group tg;
+    for (unsigned i = 0;  i < nthreads;  ++i)
+        tg.create_thread(boost::bind(&test2_segv_handler_stress_thread1,
+                                     addr, npages, boost::ref(barrier),
+                                     boost::ref(finished)));
+
+    for (unsigned i = 0;  i < npages;  ++i)
+        tg.create_thread(boost::bind(&test2_segv_handler_stress_thread2,
+                                     addr + i * page_size,
+                                     boost::ref(barrier),
+                                     boost::ref(finished)));
+
+    sleep(2);
+
+    finished = true;
+
+    tg.join_all();
+
+    cerr << endl;
+
+    // All values in all of the pages should be the same value
+    int val = *addr;
+
+    cerr << "val = " << val << endl;
+    
+    for (unsigned i = 0;  i < npages;  ++i)
+        for (unsigned j = 0;  j < page_size / sizeof(int);  ++j)
+            BOOST_CHECK_EQUAL(addr[i * page_size / sizeof(int) + j], val);
+
+    cerr << num_faults_handled << " segv faults handled" << endl;
+
+    BOOST_CHECK(num_faults_handled > 1);
 }
 
 
