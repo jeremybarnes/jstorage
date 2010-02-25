@@ -38,6 +38,7 @@ using namespace ML;
 using namespace RS;
 using namespace std;
 
+
 void * mmap_addr = 0;
 
 volatile int num_handled = 0;
@@ -179,8 +180,19 @@ void test2_segv_handler_stress_thread2(int * addr,
 
     while (!finished) {
         int region = register_segv_region(addr, addr + page_size);
-        mprotect(addr, page_size, PROT_READ);
-        mprotect(addr, page_size, PROT_READ | PROT_WRITE);
+        int res = mprotect(addr, page_size, PROT_READ);
+        if (res == -1) {
+            cerr << "mprotect(PROT_READ) returned " << strerror(errno)
+                 << endl;
+            abort();
+        }
+        res = mprotect(addr, page_size, PROT_READ | PROT_WRITE);
+        if (res == -1) {
+            cerr << "mprotect(PROT_WRITE) returned " << strerror(errno)
+                 << endl;
+            abort();
+        }
+
         unregister_segv_region(region);
     }
 
@@ -244,3 +256,36 @@ BOOST_AUTO_TEST_CASE ( test2_segv_handler_stress )
 
     BOOST_CHECK(get_num_segv_faults_handled() > 1);
 }
+
+BOOST_AUTO_TEST_CASE ( test3_normal_segv_still_works )
+{
+    // Don't make boost::test think that processes exiting is a problem
+    signal(SIGCHLD, SIG_DFL);
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        install_segv_handler();
+
+        *(char *)0 = 12;
+
+        raise(SIGKILL);
+    }
+
+    // Give it one second to exit with a SIGSEGV
+    sleep(1);
+
+    // Force it to exit anyway with a SIGKILL
+    kill(pid, SIGKILL);
+
+    int status = -1;
+    pid_t res = waitpid(pid, &status, 0);
+
+    // If it exited properly with a SIGSEGV, then we'll get that in the status.
+    // If it didn't exit, then we'll get a SIGKILL in the status instead.
+
+    BOOST_CHECK_EQUAL(res, pid);
+    BOOST_CHECK_EQUAL(status, SIGSEGV);
+}
+
+
