@@ -385,7 +385,7 @@ reback_range_after_write(int backing_file_fd,
         }
     }
 
-    return result;
+    return result * page_size;
 }
 
 size_t

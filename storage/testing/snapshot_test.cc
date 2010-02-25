@@ -26,6 +26,8 @@
 #include <sys/mman.h>
 #include <errno.h>
 
+#include <set>
+
 
 using namespace ML;
 using namespace RS;
@@ -290,7 +292,7 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
     close(pagemap_fd);
     guard.clear();
 
-    BOOST_CHECK_EQUAL(n_rebacked, 3);
+    BOOST_CHECK_EQUAL(n_rebacked, 3 * page_size);
 
     written = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size,
                                      Snapshot::RECLAIM_ONLY);
@@ -331,3 +333,115 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
     // Make sure that everything was properly closed
     BOOST_CHECK_EQUAL(files_open_before, num_open_files());
 }
+
+// This test case makes sure that pages that weren't modified in the snapshot
+// from the originally mapped file are not written to disk needlessly
+// TODO: make sure that the number of mappings doesn't explode...
+
+BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
+{
+    // Don't make boost::test think that processes exiting is a problem
+    signal(SIGCHLD, SIG_DFL);
+
+    int npages = 5;
+
+    // So we can make sure that all file descriptors were returned
+    int files_open_before = num_open_files();
+
+    // 1.  Create a backed region
+    Backed_Region region1("region1", npages * page_size);
+
+    // 2.  Write to some of the pages
+    const char * cs1 = "1abcdef\0";
+    string s1(cs1, cs1 + 8);
+
+    set<int> pages_changed;
+
+    for (unsigned i = 0;  i < npages;  ++i) {
+        int page = random() % npages;
+        set_page(region1.data, page, s1);
+        pages_changed.insert(page);
+    }
+
+    cerr << "wrote to " << pages_changed.size() << " of " << npages
+         << " pages" << endl;
+
+    // 3.  Create a snapshot
+    Snapshot snapshot1;
+
+    // 4.  Sync changed pages to snapshot
+    size_t written, rebacked, reclaimed;
+    boost::tie(written, rebacked, reclaimed)
+        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size);
+
+    BOOST_CHECK_EQUAL(written,   pages_changed.size() * page_size);
+    BOOST_CHECK_EQUAL(rebacked,  pages_changed.size() * page_size);
+    BOOST_CHECK_EQUAL(reclaimed, pages_changed.size() * page_size);
+
+    // Re-map it and check that it gave the correct data
+    {
+        Backed_Region region1a("region1", npages * page_size, false);
+        
+        BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
+                                      region1a.data,
+                                      region1a.data + region1a.size);
+    }
+
+    // 5.  Check that nothing is synced a second time
+    boost::tie(written, rebacked, reclaimed)
+        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size);
+
+    BOOST_CHECK_EQUAL(written,   0);
+    BOOST_CHECK_EQUAL(rebacked,  0);
+    BOOST_CHECK_EQUAL(reclaimed, 0);
+
+    // Re-map it and check that it gave the correct data
+    {
+        Backed_Region region1a("region1", npages * page_size, false);
+        
+        BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
+                                      region1a.data,
+                                      region1a.data + region1a.size);
+    }
+
+    set<int> pages_changed2;
+    
+    string s2 = "wxywxywx";
+    for (unsigned i = 0;  i < npages / 5;  ++i) {
+        int page = random() % npages;
+        set_page(region1.data, page, s2);
+        pages_changed2.insert(page);
+    }
+
+    cerr << "wrote to " << pages_changed2.size() << " of " << npages
+         << " pages" << endl;
+
+    // Check that only the changed pages were written
+    boost::tie(written, rebacked, reclaimed)
+        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size);
+    
+    BOOST_CHECK_EQUAL(written,   pages_changed2.size() * page_size);
+    BOOST_CHECK_EQUAL(rebacked,  pages_changed2.size() * page_size);
+    BOOST_CHECK_EQUAL(reclaimed, pages_changed2.size() * page_size);
+
+
+    BOOST_CHECK_EQUAL(snapshot1.terminate(), 0);
+
+
+    // Re-map it and check that it gave the correct data
+    {
+        Backed_Region region1a("region1", npages * page_size, false);
+        
+        BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
+                                      region1a.data,
+                                      region1a.data + region1a.size);
+    }
+
+    region1.close();
+
+    // Make sure that everything was properly closed
+    BOOST_CHECK_EQUAL(files_open_before, num_open_files());
+}
+
+// TODO: add a test where we simultaneously write all over the memory and
+// make sure that the writing doesn't affect the snapshotting and vice-versa
