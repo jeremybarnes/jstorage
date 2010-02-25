@@ -13,6 +13,7 @@
 #include "jml/utils/info.h"
 #include "jml/arch/exception.h"
 #include "jml/arch/vm.h"
+#include "jml/utils/guard.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
@@ -208,7 +209,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
 
     // 4.  Write the snapshot to region1
     size_t written
-        = snapshot1.dump_memory(region1.fd, 0, region1.data, region1.size);
+        = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size,
+                                 Snapshot::DUMP);
     
     BOOST_CHECK_EQUAL(written, npages * page_size);
 
@@ -226,6 +228,16 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
     // Make sure that everything was properly closed
     BOOST_CHECK_EQUAL(files_open_before, num_open_files());
 }
+
+namespace RS {
+
+size_t reback_range_after_write(void * memory, size_t length,
+                                int backing_file_fd,
+                                size_t backing_file_offset,
+                                int old_pagemap_file,
+                                int current_pagemap_file);
+
+} // namespace RS
 
 // This test case makes sure that pages that weren't modified in the snapshot
 // from the originally mapped file are not written to disk needlessly
@@ -252,18 +264,45 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
     set_page(region1.data, 4, s1);
 
     dump_page_info(region1.data, region1.data + region1.size);
+
+    cerr << "<=========== shapshot1" << endl;
     
     // 3.  Create a snapshot
     Snapshot snapshot1;
 
     // 4.  Sync changed pages to region1
     size_t written
-        = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size);
-    
+        = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size,
+                                 Snapshot::SYNC_ONLY);
+
     BOOST_CHECK_EQUAL(written, 3 * page_size);
 
+    int pagemap_fd = open("/proc/self/pagemap", O_RDONLY);
+    if (pagemap_fd == -1)
+        throw Exception("opening /proc/self/pagemap: %s", strerror(errno));
+    Call_Guard guard(boost::bind(close, pagemap_fd));
+
+    cerr << "before reback:" << endl;
+    dump_page_info(region1.data, region1.data + region1.size);
+
+    size_t n_rebacked
+        = reback_range_after_write(region1.data, region1.size, region1.fd,
+                                   0, snapshot1.pagemap_fd(), pagemap_fd);
+    
+    cerr << "after reback:" << endl;
+    dump_page_info(region1.data, region1.data + region1.size);
+
+    close(pagemap_fd);
+    guard.clear();
+
+    BOOST_CHECK_EQUAL(n_rebacked, 3);
+
+    written = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size,
+                                     Snapshot::RECLAIM_ONLY);
+
     // 5.  Check that nothing is synced a second time
-    written = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size);
+    written = snapshot1.sync_to_disk(region1.fd, 0, region1.data, region1.size,
+                                     Snapshot::SYNC_ONLY);
     
     BOOST_CHECK_EQUAL(written, 0);
 
@@ -273,11 +312,13 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
 
     Snapshot snapshot2;
 
-    written = snapshot2.sync_to_disk(region1.fd, 0, region1.data, region1.size);
+    written = snapshot2.sync_to_disk(region1.fd, 0, region1.data, region1.size,
+                                     Snapshot::SYNC_AND_RECLAIM);
     
     BOOST_CHECK_EQUAL(written, (int)page_size);
 
-    written = snapshot2.sync_to_disk(region1.fd, 0, region1.data, region1.size);
+    written = snapshot2.sync_to_disk(region1.fd, 0, region1.data, region1.size,
+                                     Snapshot::SYNC_AND_RECLAIM);
 
     BOOST_CHECK_EQUAL(written, 0);
 

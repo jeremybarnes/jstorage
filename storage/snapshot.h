@@ -80,78 +80,56 @@ struct Snapshot {
         return result;
     }
 
-    // Return a snapshot object that represents the current process, but
-    // operates in a different thread.
-    static Snapshot & current();
+    // Return the FD of the /proc/pid/pagemap for the snapshot process.
+    int pagemap_fd() const;
 
-    struct Remote_File {
-        const std::string & filename;
-        const Snapshot * owner;
-        int fd;
+    // What operation to perform on the file?
+    enum Sync_Op {
+        RECLAIM_ONLY,     ///< Replace private pages with disk-backed ones
+        SYNC_ONLY,        ///< Dump modified (private) pages to disk
+        SYNC_AND_RECLAIM, ///< Sync then reclaim
+        DUMP              ///< Dump all pages to disk
     };
 
-    // Create the given remote snapshot
-    Remote_File create_file(const std::string & filename,
-                            size_t size);
-
-    // Close the remote file
-    void close_file(const Remote_File & file);
-
-    // Dump the given range of (remote) virtual memory into the given file.
-    // Returns the number of pages written.
-    size_t dump_memory(int fd,
-                       size_t file_offset,
-                       void * mem_start,
-                       size_t mem_size);
-    
-    // Sync pages from a copy-on-write mapping that have been modified in
-    // the snapshot to the disk.  At the same time, it will re-map them
-    // into the snapshot process.
+    // Go through the given memory range in the snapshot's address space
+    // and perform an operation on each page that is found to be out-of-sync
+    // (ie, modified) from the copy on disk.
     //
-    // Returns the number of pages written, which will be less than or equal
-    // to mem_size (less if there were pages that didn't need to be written
-    // as they were already clean).
+    // If op is SYNC_ONLY, then the pages that are out-of-sync will be written
+    // to disk.  Note that nothing is modified that will make the pages look
+    // in-sync, so calling twice with SYNC_ONLY will result in the pages being
+    // written twice.
+    //
+    // If op is RECLAIM_ONLY, then it is assumed that a SYNC_ONLY operation
+    // has already run and no page has been modified since.  Those pages that
+    // are out-of-sync will have the corresponding disk page re-mapped onto
+    // that address.  At the end, no pages will be out of sync.  The disk will
+    // not be touched.  Any pages that were modified since the SYNC_ONLY
+    // completed will be reverted to their on-disk versions.  The primary
+    // advantage of this call is that it turns private pages (which must be
+    // evicted to swap) into backed pages (that can be cheaply evicted), and
+    // reduces the memory pressure on the machine.
+    //
+    // If op is RECLAIM_AND_SYNC, then the sync will happen, followed by the
+    // reclaim.
+    //
+    // If op is DUMP, then all pages will be written to the disk file.  Note
+    // that in this case, no reclamation takes place.  The file must have been
+    // expanded (via truncate() or similar) to be large enough to accomodate
+    // the data.  This is useful when creating a file for the first time.
+    //
+    // This function is not tolerant to simultaneous modification of the pages
+    // on the snapshot, nor to simultaneous modification of the disk file from
+    // any process.
+    //
+    // Note that the reclaim operations don't actually read the content of the
+    // pages, so it is not important that they be in memory.
     size_t sync_to_disk(int fd,
                         size_t file_offset,
                         void * mem_start,
-                        size_t mem_size);
+                        size_t mem_size,
+                        Sync_Op op);
     
-    // Dump the pages of memory that have changed between the other snapshot
-    // and this snapshot to the given file.  Used to update a snapshot file
-    // by writing out only the pages that have been modified.
-    //
-    // NOTE: we have *3* processes involved here:
-    // - The current process (not represented by any snapshot);
-    // - The new snapshot (represented by the Snapshot object that we are
-    //   running this call on;
-    // - The old snapshot (represented by the Snapshot object old_snapshot).
-    //
-    // TODO: finish this... the goal is to detect the pages of the current
-    // process that are identical to the disk pages just written, and to
-    // make the VMA point to the disk area rather than pointing to our COW
-    // copy of the page.  Not all pages will be like that as any which were
-    // written to after the snapshot will be different.  If we don't do that,
-    // then every page which was ever changed since the process started will
-    // be stuck in memory forever.  The challenge is to do it in an atomic
-    // manner.  This could be accomplished by:
-    // 1.  Marking the page read-only with mprotect(), so that any new writes
-    //     to it will cause a GPF
-    // 2.  Doing the swap, moving it from read-only to read-write in the
-    //     process.
-    // 3.  Handling the GPF (they should be rare) by waiting for the page to
-    //     come in and then retrying the write
-    //
-    // In addition to doing all of that, the function will look at the
-    // CURRENT process's pages.  Any which have not changed between the new
-    // snapshot and the current process are 
-    void sync_memory(const Remote_File & file,
-                     size_t file_offset,
-                     void * mem_start,
-                     void * mem_size,
-                     const Snapshot & old_snapshot,
-                     void * mem_start_old,
-                     size_t mem_size_old);
-
     // Terminate the snapshot; the process will die and the connection will
     // be lost.  Asynchronous.  Returns the return code of the child function.
     int terminate();
@@ -164,9 +142,6 @@ struct Snapshot {
 private:
     // Run the default function for the child process
     int run_child(int control_fd);
-
-    // Client process for the dump memory command
-    void client_dump_memory();
 
     // Client process for the sync_to_disk command
     void client_sync_to_disk();
