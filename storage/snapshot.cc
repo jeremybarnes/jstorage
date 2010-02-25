@@ -185,9 +185,44 @@ recv(std::string & str)
     recv_message(&str[0], sz);
 }
 
+boost::tuple<size_t, size_t, size_t>
+Snapshot::
+sync_and_reback(int fd,
+                size_t file_offset,
+                void * mem_start,
+                size_t mem_size,
+                int current_pagemap_file,
+                bool reback_snapshot)
+{
+    Call_Guard guard;
 
-bool needs_backing(const Pagemap_Entry & current_pagemap,
-                   const Pagemap_Entry & old_pagemap)
+    if (current_pagemap_file == -1) {
+        current_pagemap_file = open("/proc/self/pagemap", O_RDONLY);
+        if (current_pagemap_file != -1)
+            guard.set(boost::bind(close, current_pagemap_file));
+    }
+    if (current_pagemap_file == -1)
+        throw Exception(errno, "sync_and_reback()",
+                        "open(\"/proc/self/pagemap\", O_RDONLY)");
+
+    size_t n_written_in_sync
+        = sync_to_disk(fd, file_offset, mem_start, mem_size,
+                       Snapshot::SYNC_ONLY);
+
+    size_t n_rebacked
+        = reback_range_after_write(fd, file_offset, mem_start, mem_size,
+                                   pagemap_fd(), current_pagemap_file);
+    
+    size_t n_reclaimed = 0;
+    if (reback_snapshot)
+        n_reclaimed = sync_to_disk(fd, file_offset, mem_start, mem_size,
+                                   Snapshot::RECLAIM_ONLY);
+
+    return boost::make_tuple(n_written_in_sync, n_rebacked, n_reclaimed);
+}
+
+static bool needs_backing(const Pagemap_Entry & current_pagemap,
+                          const Pagemap_Entry & old_pagemap)
 {
     return current_pagemap.present
         && old_pagemap.present
@@ -195,66 +230,22 @@ bool needs_backing(const Pagemap_Entry & current_pagemap,
         && current_pagemap.pfn == old_pagemap.pfn;
 }
 
-/** Make the VM subsystem know that modified pages in a MAP_PRIVATE mmap
-    segment have now been written to disk and so the private copy can be
-    returned to the system.  The function operates transparently to all
-    other threads, which can read and write memory as they wish (using
-    appropriate memory barriers) transparently.
-
-    In order to detect which pages are now written to disk, it is necessary
-    to have forked another process that has exactly those pages that were
-    written to disk in memory.  It can't have remapped the written pages
-    onto its address space yet.  A file descriptor to that process's open
-    /proc/pid/pagemaps file needs to be passed in, as well as a file
-    descriptor to the *current* process's /proc/self/pagemaps file.
-
-    In order to determine if a page can be updated, we perform the following
-    process:
-      - If the page is not present in the current process, then it must still
-        be backed by the file and so it is skipped;
-      - If the page is present in the current process but not present in the
-        previous process, then the current process must have written to it
-        and so it is skipped;
-      - If the page is present in both processes but the physical page is
-        different, then it must have been modified in the current process
-        since the snapshot and so it is skipped;
-      - Otherwise, we can memory map the portion of the file in the current
-        process as it must be identical to the portion of the file.
-
-    In order to do this atomically, the following procedure is used:
-    1.  We remap the memory range read-only so that writes are no longer
-        possible.
-    2.  We re-perform the check to make sure that the page wasn't written
-        to between when we checked and when we made it read-only.
-    3.  We memory map the underlying page as a copy on write mapping.
-
-    If between 1 and 3 there was an attempted write to the page being
-    remapped, the thread that was doing it will get a segmentation fault.
-    This fault is handled by:
-    1.  Checking that the fault address was within the memory range.  If not,
-        a normal segfault is generated.
-    2.  Busy-waiting in the signal handler until the page is re-mapped
-        and can therefore be written to.
-    3.  Returning from the signal handler to allow the write to happen to the
-        newly mapped page.
-
-    Of course, to do this we need to make sure that all threads that start up
-    handle sigsegv.
-*/
-
-size_t reback_range_after_write(void * memory, size_t length,
-                                int backing_file_fd,
-                                size_t backing_file_offset,
-                                int old_pagemap_file,
-                                int current_pagemap_file)
+size_t
+Snapshot::
+reback_range_after_write(int backing_file_fd,
+                         size_t backing_file_offset,
+                         void * mem_start,
+                         size_t mem_size,
+                         int old_pagemap_file,
+                         int current_pagemap_file)
 {
-    if (!is_page_aligned(memory))
-        throw Exception("reback_range_after_write(): memory not page aligned");
-    if (length % page_size != 0)
+    if (!is_page_aligned(mem_start))
+        throw Exception("reback_range_after_write(): mem_start not page aligned");
+    if (mem_size % page_size != 0)
         throw Exception("reback_range_after_write(): not an integral number of"
                         "pages");
 
-    size_t npages = length / page_size;
+    size_t npages = mem_size / page_size;
 
     size_t CHUNK = 1024;  // do 1024 pages = 4MB at once
 
@@ -262,7 +253,7 @@ size_t reback_range_after_write(void * memory, size_t length,
     Pagemap_Entry current_pagemap[CHUNK];
     Pagemap_Entry old_pagemap[CHUNK];
 
-    char * mem = (char *)memory;
+    char * mem = (char *)mem_start;
 
     size_t result = 0;
 

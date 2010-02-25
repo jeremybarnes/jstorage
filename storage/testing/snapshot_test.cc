@@ -231,12 +231,6 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
 
 namespace RS {
 
-size_t reback_range_after_write(void * memory, size_t length,
-                                int backing_file_fd,
-                                size_t backing_file_offset,
-                                int old_pagemap_file,
-                                int current_pagemap_file);
-
 } // namespace RS
 
 // This test case makes sure that pages that weren't modified in the snapshot
@@ -286,8 +280,9 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
     dump_page_info(region1.data, region1.data + region1.size);
 
     size_t n_rebacked
-        = reback_range_after_write(region1.data, region1.size, region1.fd,
-                                   0, snapshot1.pagemap_fd(), pagemap_fd);
+        = Snapshot::
+        reback_range_after_write(region1.fd, 0, region1.data, region1.size,
+                                 snapshot1.pagemap_fd(), pagemap_fd);
     
     cerr << "after reback:" << endl;
     dump_page_info(region1.data, region1.data + region1.size);
