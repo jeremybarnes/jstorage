@@ -369,15 +369,24 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
     // 3.  Create a snapshot
     Snapshot snapshot1;
 
+    cerr << endl << "before first sync" << endl;
+    dump_page_info(region1.data, region1.data + region1.size);
+    cerr << endl;
+
     // 4.  Sync changed pages to snapshot
     size_t written, rebacked, reclaimed;
     boost::tie(written, rebacked, reclaimed)
         = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size,
-                                    Snapshot::NO_RECLAIM);
+                                    Snapshot::RECLAIM);
 
     BOOST_CHECK_EQUAL(written,   pages_changed.size() * page_size);
     BOOST_CHECK_EQUAL(rebacked,  pages_changed.size() * page_size);
     BOOST_CHECK_EQUAL(reclaimed, pages_changed.size() * page_size);
+    
+    cerr << endl << "after first sync" << endl;
+    dump_page_info(region1.data, region1.data + region1.size);
+    cerr << endl;
+
 
     // Re-map it and check that it gave the correct data
     {
@@ -388,12 +397,14 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
                                       region1a.data + region1a.size);
     }
 
-    cerr << "<================= syncing a second time" << endl;
+    cerr << endl << "first sync and mapped" << endl;
+    dump_page_info(region1.data, region1.data + region1.size);
+    cerr << endl;
 
     // 5.  Check that nothing is synced a second time
     boost::tie(written, rebacked, reclaimed)
         = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size,
-                                    Snapshot::NO_RECLAIM);
+                                    Snapshot::RECLAIM);
 
     BOOST_CHECK_EQUAL(written,   0);
     BOOST_CHECK_EQUAL(rebacked,  0);
@@ -408,8 +419,9 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
                                       region1a.data + region1a.size);
     }
 
-    cerr << "before changing pages again" << endl;
+    cerr << endl << "before changing pages again" << endl;
     dump_page_info(region1.data, region1.data + region1.size);
+    cerr << endl;
 
     set<int> pages_changed2;
     
@@ -423,9 +435,9 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
     cerr << "wrote to " << pages_changed2.size() << " of " << npages
          << " pages" << endl;
 
-    cerr << "after changing pages again" << endl;
+    cerr << endl << "after changing pages again" << endl;
     dump_page_info(region1.data, region1.data + region1.size);
-
+    cerr << endl;
 
     // Check that only the changed pages were written
     boost::tie(written, rebacked, reclaimed)

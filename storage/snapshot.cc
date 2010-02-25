@@ -495,6 +495,16 @@ client_sync_to_disk()
                 if (addr != mem_start)
                     throw Exception("mmap failed: "  + string(strerror(errno)));
 
+                // Map the page in by reading it
+                char c = *(const char *)addr;
+
+                __asm__
+                    (" # [in]"
+                     : 
+                     : [in] "r" (c)
+                     :
+                     );
+
                 if (op == RECLAIM_ONLY) res = page_size;
             }
             
