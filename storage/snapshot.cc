@@ -80,6 +80,8 @@ Snapshot(Worker worker)
             cerr << "child exiting with unknown exception " << endl;
         }
 
+        cerr << "child exiting with return code " << return_code << endl;
+
         // Now die.  We do it this way to avoid any destructors running, etc
         // which might do things that we don't want them to and interfere with
         // the parent process.
@@ -191,8 +193,8 @@ sync_and_reback(int fd,
                 size_t file_offset,
                 void * mem_start,
                 size_t mem_size,
-                int current_pagemap_file,
-                bool reback_snapshot)
+                Reclaim_Option reclaim_snapshot,
+                int current_pagemap_file)
 {
     Call_Guard guard;
 
@@ -214,7 +216,7 @@ sync_and_reback(int fd,
                                    pagemap_fd(), current_pagemap_file);
     
     size_t n_reclaimed = 0;
-    if (reback_snapshot)
+    if (reclaim_snapshot == RECLAIM)
         n_reclaimed = sync_to_disk(fd, file_offset, mem_start, mem_size,
                                    Snapshot::RECLAIM_ONLY);
 

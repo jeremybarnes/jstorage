@@ -287,5 +287,3 @@ BOOST_AUTO_TEST_CASE ( test3_normal_segv_still_works )
     BOOST_CHECK_EQUAL(res, pid);
     BOOST_CHECK_EQUAL(status, SIGSEGV);
 }
-
-

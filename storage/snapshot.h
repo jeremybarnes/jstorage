@@ -125,13 +125,18 @@ struct Snapshot {
     //     update the snapshot's private pages to the mapped ones that were
     //     written.
     
+    enum Reclaim_Option {
+        NO_RECLAIM,
+        RECLAIM
+    };
+
     boost::tuple<size_t, size_t, size_t>
     sync_and_reback(int fd,
                     size_t file_offset,
                     void * mem_start,
                     size_t mem_size,
-                    int current_pagemap_file = -1,
-                    bool reback_snapshot = true);
+                    Reclaim_Option reclaim_snapshot,
+                    int current_pagemap_file = -1);
 
     // What operation to perform on the file?
     enum Sync_Op {

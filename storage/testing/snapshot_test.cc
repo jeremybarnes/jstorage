@@ -372,7 +372,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
     // 4.  Sync changed pages to snapshot
     size_t written, rebacked, reclaimed;
     boost::tie(written, rebacked, reclaimed)
-        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size);
+        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size,
+                                    Snapshot::NO_RECLAIM);
 
     BOOST_CHECK_EQUAL(written,   pages_changed.size() * page_size);
     BOOST_CHECK_EQUAL(rebacked,  pages_changed.size() * page_size);
@@ -387,9 +388,12 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
                                       region1a.data + region1a.size);
     }
 
+    cerr << "<================= syncing a second time" << endl;
+
     // 5.  Check that nothing is synced a second time
     boost::tie(written, rebacked, reclaimed)
-        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size);
+        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size,
+                                    Snapshot::NO_RECLAIM);
 
     BOOST_CHECK_EQUAL(written,   0);
     BOOST_CHECK_EQUAL(rebacked,  0);
@@ -404,6 +408,9 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
                                       region1a.data + region1a.size);
     }
 
+    cerr << "before changing pages again" << endl;
+    dump_page_info(region1.data, region1.data + region1.size);
+
     set<int> pages_changed2;
     
     string s2 = "wxywxywx";
@@ -416,9 +423,14 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
     cerr << "wrote to " << pages_changed2.size() << " of " << npages
          << " pages" << endl;
 
+    cerr << "after changing pages again" << endl;
+    dump_page_info(region1.data, region1.data + region1.size);
+
+
     // Check that only the changed pages were written
     boost::tie(written, rebacked, reclaimed)
-        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size);
+        = snapshot1.sync_and_reback(region1.fd, 0, region1.data, region1.size,
+                                    Snapshot::RECLAIM);
     
     BOOST_CHECK_EQUAL(written,   pages_changed2.size() * page_size);
     BOOST_CHECK_EQUAL(rebacked,  pages_changed2.size() * page_size);
@@ -432,9 +444,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
     {
         Backed_Region region1a("region1", npages * page_size, false);
         
-        BOOST_CHECK_EQUAL_COLLECTIONS(region1.data, region1.data + region1.size,
-                                      region1a.data,
-                                      region1a.data + region1a.size);
+        BOOST_CHECK(std::equal(region1.data, region1.data + region1.size,
+                               region1a.data));
     }
 
     region1.close();
