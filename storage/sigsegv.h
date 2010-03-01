@@ -10,7 +10,7 @@
 
 #include <vector>
 
-namespace RS {
+namespace JGraph {
 
 int register_segv_region(const void * start, const void * end);
 void unregister_segv_region(int region);
@@ -18,7 +18,7 @@ void install_segv_handler();
 size_t get_num_segv_faults_handled();
 
 
-} // namespace RS
+} // namespace JGraph
 
 #endif /* __jmvcc__storage__sigsegv_h__ */
 

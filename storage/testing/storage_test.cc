@@ -1,6 +1,6 @@
 /* storage_test.cc
    Jeremy Barnes, 18 February 2010
-   Copyright (c) 2010 Recoset.  All rights reserved.
+   Copyright (c) 2010 Jeremy Barnes.  All rights reserved.
 
    Test of the storage functionality.
 */

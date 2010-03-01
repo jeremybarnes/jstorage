@@ -16,7 +16,7 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
-#include "recoset/storage/sigsegv.h"
+#include "jgraph/storage/sigsegv.h"
 #include <signal.h>
 
 #include <sys/types.h>
@@ -35,7 +35,7 @@
 
 
 using namespace ML;
-using namespace RS;
+using namespace JGraph;
 using namespace std;
 
 

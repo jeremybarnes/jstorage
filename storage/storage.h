@@ -9,7 +9,7 @@
 #ifndef __platform__storage_h__
 #define __platform__storage_h__
 
-namespace RS {
+namespace JGraph {
 
 
 
@@ -76,7 +76,7 @@ struct Storage_Manager {
     
 };
 
-} // namespace RS
+} // namespace JGraph
 
 #endif /* __platform__storage_h__ */
 

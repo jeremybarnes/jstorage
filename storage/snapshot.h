@@ -22,7 +22,7 @@
 #include <string>
 
 
-namespace RS {
+namespace JGraph {
 
 
 /*****************************************************************************/
@@ -262,6 +262,6 @@ private:
     boost::scoped_ptr<Itl> itl;
 };
 
-} // namespace RS
+} // namespace JGraph
 
 #endif /* __storage__snapshot_h__ */

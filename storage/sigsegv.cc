@@ -16,7 +16,7 @@
 using namespace ML;
 using namespace std;
 
-namespace RS {
+namespace JGraph {
 
 struct Segv_Descriptor {
     Segv_Descriptor()
@@ -223,4 +223,4 @@ void install_segv_handler()
 }
 
 
-} // namespace RS
+} // namespace JGraph

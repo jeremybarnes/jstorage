@@ -1,6 +1,6 @@
 /* storage_test.cc
    Jeremy Barnes, 18 February 2010
-   Copyright (c) 2010 Recoset.  All rights reserved.
+   Copyright (c) 2010 Jeremy Barnes.  All rights reserved.
 
    Test of the storage functionality.
 */
@@ -17,7 +17,7 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
-#include "recoset/storage/snapshot.h"
+#include "jgraph/storage/snapshot.h"
 #include <signal.h>
 
 #include <sys/types.h>
@@ -30,7 +30,7 @@
 
 
 using namespace ML;
-using namespace RS;
+using namespace JGraph;
 using namespace std;
 
 using boost::unit_test::test_suite;

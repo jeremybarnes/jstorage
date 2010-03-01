@@ -8,8 +8,8 @@
 #define BOOST_TEST_MAIN
 #define BOOST_TEST_DYN_LINK
 
-#include "recoset/attr/attribute.h"
-#include "recoset/attr/attribute_basic_types.h"
+#include "jgraph/attr/attribute.h"
+#include "jgraph/attr/attribute_basic_types.h"
 #include "jml/utils/string_functions.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>

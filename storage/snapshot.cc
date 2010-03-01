@@ -26,7 +26,7 @@ using namespace std;
 using namespace ML;
 
 
-namespace RS {
+namespace JGraph {
 
 
 /*****************************************************************************/
@@ -623,4 +623,4 @@ run_child(int control_fd)
 }
 
 
-} // namespace RS
+} // namespace JGraph
