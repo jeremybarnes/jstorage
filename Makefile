@@ -29,6 +29,6 @@ include $(JML_TOP)/rules.mk
 $(shell echo GOALS := $(MAKECMDGOALS) > .target.mk)
 endif
 
-
 $(eval $(call include_sub_makes,attr))
 $(eval $(call include_sub_makes,storage))
+$(eval $(call include_sub_makes,jmvcc))
