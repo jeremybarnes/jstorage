@@ -241,6 +241,23 @@ reback_range_after_write(int backing_file_fd,
                          int old_pagemap_file,
                          int current_pagemap_file)
 {
+    bool debug = true;
+
+    const char * file_addr
+        = (const char *)
+          mmap(0, mem_size, PROT_READ, MAP_SHARED | MAP_POPULATE,
+               backing_file_fd,
+               backing_file_offset);
+
+    if (file_addr == MAP_FAILED)
+        throw Exception(errno, "reback_range_after_write()",
+                        "mmap() of backing file");
+    Call_Guard munmap_file_addr_guard(boost::bind(munmap, (void *)file_addr,
+                                                  mem_size));
+    
+    cerr << endl;
+    cerr << "========= reback_range_after_write pid=" << getpid() << endl;
+
     if (!is_page_aligned(mem_start))
         throw Exception("reback_range_after_write(): mem_start not page aligned");
     if (mem_size % page_size != 0)
@@ -254,22 +271,33 @@ reback_range_after_write(int backing_file_fd,
     // To store the page map entries in
     Pagemap_Entry current_pagemap[CHUNK];
     Pagemap_Entry old_pagemap[CHUNK];
+    Pagemap_Entry file_pagemap[CHUNK];
 
     char * mem = (char *)mem_start;
 
     size_t result = 0;
 
-    for (unsigned i = 0;  i < npages;  i += CHUNK, mem += CHUNK * page_size) {
+    for (unsigned i = 0;  i < npages;  i += CHUNK, mem += CHUNK * page_size, file_addr += CHUNK * page_size) {
         int todo = std::min(npages - i, CHUNK);
 
         Pagemap_Reader pm_old(mem, todo * page_size, old_pagemap,
                               old_pagemap_file);
         Pagemap_Reader pm_current(mem, todo * page_size, current_pagemap,
                                   current_pagemap_file);
+        Pagemap_Reader pm_mmap(file_addr, todo * page_size, file_pagemap,
+                               current_pagemap_file);
 
         cerr << "pm_old = " << endl << pm_old << endl;
         cerr << "pm_current = " << endl << pm_current << endl;
+
         
+        // Fault in the backing pages so we can see if they're the
+        // same
+        madvise((void *)file_addr, todo * page_size, MADV_WILLNEED);
+        pm_mmap.update();
+        
+        cerr << "pm_mmap = " << endl << pm_mmap << endl;
+
         // The value of j at which we start backing pages
         int backing_start = -1;
         
@@ -309,6 +337,16 @@ reback_range_after_write(int backing_file_fd,
                 char * start = mem + backing_start * page_size;
                 size_t len   = npages * page_size;
 
+#if 0
+                // Fault in the backing pages so we can see if they're the
+                // same
+                madvise(file_addr + backing_start * page_size, len,
+                        MADV_WILLNEED);
+
+                pm_mmap.update(file_addr + backing_start * page_size,
+                               file_addr + backing_end * page_size);
+#endif
+
                 // 1.  Add this read-only region to the SIGSEGV handler's list
                 // of active regions
 
@@ -331,7 +369,7 @@ reback_range_after_write(int backing_file_fd,
                                                       PROT_READ | PROT_WRITE));
                 
                 // 3.  Re-scan the page map as entries may have changed
-                size_t num_changed = pm_current.update();
+                size_t num_changed = pm_current.update(start, start + len);
 
                 // TODO: what about exceptions from here onwards?
                 
@@ -385,7 +423,16 @@ reback_range_after_write(int backing_file_fd,
             if (need_backing && backing_start == -1)
                 backing_start = j;
         }
+
+        if (debug) {
+            pm_current.update();
+            cerr << "pm_current after = " << endl << pm_current << endl;
+        }
+
     }
+
+    cerr << "========= end reback_range_after_write pid=" << getpid() << endl;
+    cerr << endl;
 
     return result * page_size;
 }

@@ -213,6 +213,7 @@ struct Snapshot {
             process as it must be identical to the portion of the file.
 
         In order to do this atomically, the following procedure is used:
+
         1.  We remap the memory range read-only so that writes are no longer
             possible.
         2.  We re-perform the check to make sure that the page wasn't written
@@ -222,6 +223,7 @@ struct Snapshot {
         If between 1 and 3 there was an attempted write to the page being
         remapped, the thread that was doing it will get a segmentation fault.
         This fault is handled by:
+
         1.  Checking that the fault address was within the memory range.  If
             not, a normal segfault is generated.
         2.  Busy-waiting in the signal handler until the page is re-mapped
