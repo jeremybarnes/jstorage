@@ -11,7 +11,19 @@
 
 namespace JGraph {
 
+struct StructAttribute {
+    AttributeRef operator [] (const std::string & attr_name) const;
+    AttributeRef operator [] (unsigned attr_num) const;
+    
+private:
+    AttributeRef attr;
+};
 
+struct StructTraits {
+    StructTraits();
+    virtual ~StructTraits();
+
+};
 
 
 /*****************************************************************************/

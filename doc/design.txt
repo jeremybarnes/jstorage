@@ -1,0 +1,39 @@
+Design criteria
+---------------
+
+* Use boost::interprocess?  Should be a win as malloc, etc is handled for us
+  and we can use STL containers at least initially
+
+
+* MVCC: one version at a time on disk
+  * Snapshots are made of a given version
+  * How do we deal with threads that have a view of an older version?
+    - Handle in separate process?
+      - NO, they might need to write results to an up-to-date view
+    - Keep multiple versions around somehow?
+      - Could be cleaned up when the old version accessed them
+      - Could be implemented using deltas for the old version (with cleanups
+        for memory regions once the critical sections had exited)
+
+PersistentVersionedObject:
+  - One version is marked as the persistent version
+  - The other ones are in-memory only
+  - When there is only one version, and that's the persistent version, then
+    the in-memory shadow can be removed
+  - To perform a snapshot of a given persistent version (assuming no sharing):
+    1.  Write the new version somewhere new in the mapped file
+    2.  Copy the old version into memory somewhere
+    3.  Write pointers to the two versions in the in-memory structure
+    4.  Queue a cleanup for the old version
+
+
+Difficult features to combine all at once:
+1.  Memory mapped files
+2.  MVCC
+3.  Date-based history (will be done at a higher level)
+4.  Dynamic data structures
+5.  Bit-compression
+6.  Snapshotting and strong guarantees on data
+7.  On-line re-compression, etc
+
+Most important: 1, 2 and 4
