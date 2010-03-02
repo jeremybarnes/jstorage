@@ -13,10 +13,14 @@
 namespace JGraph {
 
 struct MMap_Storage {
-    MMap_Storage(const std::string & backing_file);
+    MMap_Storage(const std::string & backing_file)
+    {
+    }
 
     // Clear all elements
-    void clear();
+    void clear()
+    {
+    }
 };
 
 } // namespace JGraph

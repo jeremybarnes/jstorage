@@ -32,3 +32,5 @@ endif
 $(eval $(call include_sub_makes,attr))
 $(eval $(call include_sub_makes,storage))
 $(eval $(call include_sub_makes,jmvcc))
+$(eval $(call include_sub_makes,mmap))
+$(eval $(call include_sub_makes,graphmap))
