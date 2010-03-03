@@ -8,11 +8,12 @@
 #ifndef __jmvcc__versioned2_h__
 #define __jmvcc__versioned2_h__
 
-#include <iostream> // debug
-#include "versioned.h"
-#include "jml/utils/circular_buffer.h"
+#include "versioned_object.h"
+#include "transaction.h"
 #include "jml/arch/cmp_xchg.h"
 #include "jml/arch/atomic_ops.h"
+#include "jml/arch/exception.h"
+#include "jml/arch/threads.h"
 #include "garbage.h"
 
 
@@ -110,7 +111,7 @@ private:
         T value;
     };
 
-    // Internal data object allocated
+    // Internal data object allocated for when we have more than one version
     struct Data {
         Data(size_t capacity)
             : capacity(capacity), first(0), last(0)
@@ -349,7 +350,6 @@ public:
 
     virtual void rollback(Epoch new_epoch, void * local_data) throw ()
     {
-#if 1
         const Data * d = get_data();
 
         for (;;) {
@@ -357,15 +357,6 @@ public:
             d2->pop_back();
             if (set_data(d, d2)) return;
         }
-#else
-        Data * d;
-        do {
-            d = get_data();
-            d->pop_back();
-            d->back().valid_to = 1;  // probably unnecessary...
-            memory_barrier();
-        } while (d != data);
-#endif
     }
 
     virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch)

@@ -15,6 +15,59 @@ Design criteria
       - Could be implemented using deltas for the old version (with cleanups
         for memory regions once the critical sections had exited)
 
+
+
+Difficult features to combine all at once:
+1.  Memory mapped files
+2.  MVCC
+3.  Date-based history (will be done at a higher level)
+4.  Dynamic data structures
+5.  Bit-compression
+6.  Deltas and minor or batched transactions (eg, incrementing a field)
+7.  Snapshotting and strong guarantees on data
+8.  On-line re-compression, etc
+9.  Graph mapping layer
+
+Most important: 1, 2 and 4
+
+
+Order of implementation:
+1.  MVCC (done)
+2.  MVCC with memory mapped files (PersistentVersionedObject)
+3.  Add dynamic data structures
+4.  Add snapshotting and data guarantees
+5.  Add graph mapping layer
+6.  Add bit compression, deltas
+7.  Add date-based history
+
+
+MVCC with memory mapped files
+-----------------------------
+
+Concept of memory regions
+  - Persistent region: allocations are done in a mmapped region
+  - Transient region: allocations are done in a normal region
+  - Pointers in a persistent region can only point in the same persistent
+    region
+  - Pointers in a memory region can point to either
+
+VersionedObject always lives in memory
+  - A maximum of one entry goes to the on-disk version
+  - The rest are in-memory versions
+
+Two operations:
+  - Commit: publish a new version in memory without necessarily putting it on
+    disk;
+  - Save: put the given object in memory
+
+When we decide to commit a version to disk:
+  - Write the new object to disk
+  - Add the pointer to the new object
+  - When the old epoch gets cleaned up, we deallocate it from the persistent
+    region
+
+We need to keep track of which parts of memory belong to each
+
 PersistentVersionedObject:
   - One version is marked as the persistent version
   - The other ones are in-memory only
@@ -27,13 +80,41 @@ PersistentVersionedObject:
     4.  Queue a cleanup for the old version
 
 
-Difficult features to combine all at once:
-1.  Memory mapped files
-2.  MVCC
-3.  Date-based history (will be done at a higher level)
-4.  Dynamic data structures
-5.  Bit-compression
-6.  Snapshotting and strong guarantees on data
-7.  On-line re-compression, etc
+Object Identity
+---------------
 
-Most important: 1, 2 and 4
+- We can't use the address of the value, as that can be different for each
+  of the epochs
+- We can't use the address of the pointer to the value table, as that also
+  could change when one object is nested in another
+- At the top level, we can use a string to uniquely identify an object (this is in fact the only way to do so)
+
+- However, an object can only be serialized in one place at a time
+- Thus, an object's ID is:
+  - For an object that ONLY exists serialized (ie, has not been accessed),
+    the object ID is the address of the object in the serialized file, at the
+    serialized epoch
+  - For an object that has been accessed and so has both serialized and
+    unserialized representations, the object ID is the address of the object
+    in memory that represents all of its values
+  - It becomes more complicated when an object is moved in the serialized file
+    from one place to another:
+    - Those which have an in-memory instantiation
+    another, we remember where it was and where it moved to.  This allows us
+    to find
+ 
+  
+
+
+
+Batched Transactions
+--------------------
+
+* Rather than applying immediately on commit, these transactions are kept
+  around and applied periodically in a single transaction for the whole batch
+* Saves a lot of overhead
+* Useful for things like incrementing counters used for statistics, etc
+* Operations should not fail except in exceptional circumstances (eg, incrementing a counter could fail if the user's account had been deleted since, but normally cannot do so)
+* Provided in groups: either the whole group succeeds or none do
+* Still atomic
+* Normally recorded as delta operations

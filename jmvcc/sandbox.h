@@ -47,6 +47,8 @@ public:
 
     void clear();
 
+    // Return the local value for the given object.  Returns a null pointer
+    // if there wasn't any.
     template<typename T>
     T * local_value(Versioned_Object * obj)
     {
@@ -55,6 +57,8 @@ public:
         return reinterpret_cast<T *>(it->second.val);
     }
 
+    // Return the local value for the given object, or create it if it
+    // doesn't exist.  Returns the inserted value.
     template<typename T>
     T * local_value(Versioned_Object * obj, const T & initial_value)
     {
