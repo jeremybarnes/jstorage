@@ -33,6 +33,7 @@ clear()
              it = local_values.begin(),
              end = local_values.end();
          it != end;  ++it) {
+        it->first->destroy_local_value(it->second.val);
         free(it->second.val);
     }
     local_values.clear();

@@ -525,6 +525,11 @@ public:
         return ostream_format(*reinterpret_cast<T *>(val));
     }
 
+    virtual void destroy_local_value(void * val) const
+    {
+        reinterpret_cast<T *>(val)->~T();
+    }
+
     virtual void validate() const
     {
 #if 0

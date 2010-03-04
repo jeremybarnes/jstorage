@@ -36,4 +36,10 @@ print_local_value(void * val) const
     return ML::format("%08p", val);
 }
 
+void
+Versioned_Object::
+destroy_local_value(void * val) const
+{
+}
+
 } // namespace JMVCC

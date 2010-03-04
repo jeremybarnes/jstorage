@@ -49,6 +49,12 @@ struct Versioned_Object {
                                int indent = 0) const;
 
     virtual std::string print_local_value(void * val) const;
+
+    // Destroy the local object that was created.  Default does nothing;
+    // normally it should simply run the constructor of the destroyed object.
+    // Note that this should NOT free the value, just run any destructors
+    // necessary.
+    virtual void destroy_local_value(void * val) const;
 };
 
 
