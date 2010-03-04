@@ -20,6 +20,7 @@
 #include <boost/bind.hpp>
 #include <fstream>
 #include <vector>
+#include "jml/utils/testing/live_counting_obj.h"
 
 #include <signal.h>
 
@@ -59,20 +60,6 @@ private:
     ObjectID id_;  ///< Identity in the memory mapped region
     PersistentObjectStore * owner_;  ///< Responsible for dealing with it
 };
-
-
-/*****************************************************************************/
-/* AOTABLE                                                                   */
-/*****************************************************************************/
-
-/** A table of the addressable objects that are alive in a space.  Backed by
-    a memory map.  In an independent file so that it can grow independently
-    from the memory it uses.
-
-    For references to external objects, 
-*/
-
-// ...
 
 
 /*****************************************************************************/
@@ -431,6 +418,8 @@ struct AORef {
     bool rw;
 
     operator const Obj () const { return ao->read(); }
+
+    const Obj & read() const { return ao->read(); }
 };
 
 
@@ -567,9 +556,11 @@ private:
 };
 
 
-BOOST_AUTO_TEST_CASE( test1 )
+BOOST_AUTO_TEST_CASE( test_construct_in_trans1 )
 {
-    unlink("pvot_backing1");
+    const char * fname = "pvot_backing1";
+    unlink(fname);
+    remove_file_on_destroy destroyer1(fname);
 
     // The region for persistent objects, as anonymous mapped memory
     PersistentObjectStore store(create_only, "pvot_backing1", 65536);
@@ -594,6 +585,50 @@ BOOST_AUTO_TEST_CASE( test1 )
         // Make sure the objects didn't get committed
         BOOST_CHECK_EQUAL(store.object_count(), 0);
     }
+}
+
+BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
+{
+    const char * fname = "pvot_backing2";
+    remove_file_on_destroy destroyer1(fname);
+    unlink(fname);
+
+    constructed = destroyed = 0;
+
+    {
+        // The region for persistent objects, as anonymous mapped memory
+        PersistentObjectStore store(create_only, fname, 65536);
+        
+        {
+            Local_Transaction trans;
+            // Two persistent versioned objects
+            AORef<Obj> obj1 = store.construct<Obj>(0);
+
+            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            
+            AORef<Obj> obj2 = store.construct<Obj>(1);
+
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+            
+            BOOST_CHECK_EQUAL(obj1.read(), 0);
+            BOOST_CHECK_EQUAL(obj2.read(), 1);
+            
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+            
+            // Don't commit the transaction
+        }
+
+        BOOST_CHECK_EQUAL(constructed, destroyed);
+        
+        {
+            Local_Transaction trans;
+            
+            // Make sure the objects didn't get committed
+            BOOST_CHECK_EQUAL(store.object_count(), 0);
+        }
+    }
+
+    BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
 #if 0
