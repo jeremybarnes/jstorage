@@ -388,10 +388,6 @@ private:
     bool set_version_table(const VT * & old_version_table,
                            VT * new_version_table)
     {
-        // For the moment, the commit lock is held when we update this, so
-        // there is no possibility of conflict.  But if ever we decide to
-        // allow for parallel commits, then we need to be more careful here
-        // to do it atomically.
         memory_barrier();
 
         bool result = cmp_xchg(reinterpret_cast<VT * &>(version_table),
@@ -477,6 +473,7 @@ public:
             
             static Lock lock;
             Guard guard2(lock);
+            using namespace std;
             cerr << "----------- cleaning up didn't exist ---------" << endl;
             dump_unlocked();
             cerr << "unused_valid_from = " << unused_valid_from << endl;
