@@ -39,7 +39,7 @@ struct MemoryRegion {
     size_t  length;
 };
 
-typedef uint32_t ObjectID;
+typedef uint64_t ObjectID;
 
 class PersistentObjectStore;
 
@@ -55,44 +55,6 @@ class PersistentObjectStore;
     For references to external objects, 
 */
 
-struct AOTable {
-    // We 
-#if 0
-    struct Entry {
-        union {
-            struct {
-                uint64_t area:22;          ///< For if we have multiple areas
-                uint64_t offset:40;        ///< 1TB; should be enough
-                uint64_t alloc:1;          ///< Allocated or free?
-                uint64_t locked1:1;        ///< For 32 bit machines
-            };
-            uint64_t bits1;
-        };
-        union {
-            struct {
-                uint64_t generation:24;    ///< For external to detect deletion
-                uint64_t type:24;          ///< Type of object
-                uint64_t ver:3;            ///< Version of this data structure
-                uint64_t locked2:1;        ///< For 32 bit machines
-            };
-            uint64_t bits2;
-        };
-    };
-#endif
-    struct Entry {
-        union {
-            struct {
-                uint64_t offset:48;
-                uint64_t unused:14;
-                uint64_t alloc:1;
-                uint64_t locked:1;    ///< For machines without CAS64
-            };
-            uint64_t bits;
-        };
-    };
-
-    std::vector<Entry> entries;
-};
 
 
 /*****************************************************************************/
@@ -117,11 +79,58 @@ private:
 
 
 /*****************************************************************************/
-/* ADDRESSABLE_OBJECT_TEMPLATE                                              */
+/* TYPED_AO                                                                  */
 /*****************************************************************************/
 
-template<typename T, bool Inline = sizeof(T) <= sizeof(void *)>
-struct AOT : public AddressableObject {
+template<typename T>
+struct TypedAO : public AddressableObject {
+
+    TypedAO();
+
+    TypedAO(const T & val);
+
+    // Client interface.  Just two methods to get at the current value.
+    T & mutate()
+    {
+        if (!current_trans) no_transaction_exception(this);
+        T * local = current_trans->local_value<T>(this);
+
+        if (!local) {
+            T value;
+            {
+                //value = get_data()->value_at_epoch(current_trans->epoch());
+            }
+            local = current_trans->local_value<T>(this, value);
+            
+            if (!local)
+                throw Exception("mutate(): no local was created");
+        }
+        
+        return *local;
+    }
+
+    void write(const T & val)
+    {
+        mutate() = val;
+    }
+    
+    const T read() const
+    {
+        if (!current_trans) {
+            throw Exception("reading outside a transaction");
+        }
+        const T * val = current_trans->local_value<T>(this);
+        
+        if (val) return *val;
+
+#if 0        
+        const Data * d = get_data();
+
+        T result = d->value_at_epoch(current_trans->epoch());
+        return result;
+#endif
+    }
+
 
     // Get the commit ready and check that everything can go ahead, but
     // don't actually perform the commit
@@ -132,6 +141,7 @@ struct AOT : public AddressableObject {
         // 2.  Allocate heap memory for the new internal data structure
 
         // 3.  Success
+        throw Exception("not implemented");
     }
 
     // Confirm a setup commit, making it permanent
@@ -143,17 +153,20 @@ struct AOT : public AddressableObject {
 
         // 3.  Arrange for the old memory to be freed once everything has made
         //     a critical section transition
+        throw Exception("not implemented");
     }
 
     // Roll back a setup commit
     virtual void rollback(Epoch new_epoch, void * data) throw ()
     {
         // 1.  Deallocate the memory from the owner in the mmap range
+        throw Exception("not implemented");
     }
 
     // Clean up an unused version
     virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch)
     {
+        throw Exception("not implemented");
     }
     
     // Rename an epoch to a different number.  Returns the valid_from value
@@ -161,32 +174,41 @@ struct AOT : public AddressableObject {
     virtual Epoch rename_epoch(Epoch old_valid_from,
                                Epoch new_valid_from) throw ()
     {
+        throw Exception("not implemented");
     }
 
     virtual void dump(std::ostream & stream = std::cerr, int indent = 0) const
     {
+        throw Exception("not implemented");
     }
 
     virtual void dump_unlocked(std::ostream & stream = std::cerr,
                                int indent = 0) const
     {
+        throw Exception("not implemented");
     }
 
     virtual std::string print_local_value(void * val) const
     {
+        throw Exception("not implemented");
     }
 
 private:
     const char * current;  ///< Current version as serialized
 };
 
+template<typename Obj, typename AO = TypedAO<Obj> >
+struct AORef {
+    AORef(AO * ao)
+        : ao(ao), obj(0), rw(false)
+    {
+    }
 
+    AO * ao;
+    Obj * obj;
+    bool rw;
 
-/*****************************************************************************/
-/* SNAPSHOT_MANAGER                                                          */
-/*****************************************************************************/
-
-struct Snapshot_Manager {
+    operator const Obj () const { return ao->read(); }
 };
 
 
@@ -218,7 +240,7 @@ struct PersistentObjectStore
     PersistentObjectStore(const Creation & creation,
                           const std::string & filename,
                           size_t size)
-        : backing(creation, filename, size)
+        : backing(creation, filename.c_str(), size)
     {
     }
 
@@ -239,77 +261,119 @@ struct PersistentObjectStore
         invalid as soon as the last snapshot that it was alive in has
         disappeared.
     */
-    std::hash_map<ObjectID, AddressableObject *> addressable;
 
-    AddressableObject * get_object();
+    struct AOEntry {
+        AOEntry()
+            : local(0)
+        {
+        }
 
-
-    /*************************************************************************/
-    /* NAMED OBJECTS                                                         */
-    /*************************************************************************/
-
-    struct NamedObjectRef {
+        AOEntry(AddressableObject * local)
+            : local(local)
+        {
+        }
+        
+        union {
+            struct {
+                uint64_t offset;
+            };
+            uint64_t bits;
+        };
+        
+        AddressableObject * local;
     };
-
-    template<typename Underlying>
-    struct PVConstructor {
-        PVConstructor(void * mem, size_t size, PersistentObjectStore * store)
-            : mem(mem), size(size), store(store), used(false), called(false)
+    
+    // TODO: should be able to live on the heap (for snapshots) or in a file
+    struct AOTable : public std::vector<AOEntry> {
+        AOTable()
+            : object_count_(0)
         {
         }
 
-        ~ObjectConstructor()
+        ~AOTable()
         {
-            if (!called)
-                throw Exception("ObjectConstructor was not called");
-            if (!used)
-                store->deallocate(mem, size);
-        }
-        
-        void * mem;
-        size_t size;
-        PersistentObjectStore * store;
-        bool used;
-        bool called;
-        
-        PV<Underlying> operator () () const
-        {
-            called = true;
-            PV<Underlying> result(new (mem) Object());
-            used = true;
-            return result;
+            for (const_iterator it = begin(), e = end(); it != e;  ++it)
+                delete it->local;
         }
 
-        template<typename Arg1>
-        PV<Underlying> operator () (const Arg1 & arg1) const
-        {
-            called = true;
-            PV<Underlying> result(new (mem) Object(arg1));
-            used = true;
-            return result;
-        }
+        size_t object_count_;
 
-        template<typename Arg1, typename Arg2>
-        PV<Underlying>
-        operator () (const Arg1 & arg1, const Arg2 & arg2) const
+        size_t object_count() const
         {
-            called = true;
-            PV<Underlying> result(new (mem) Object(arg1, arg2));
-            used = true;
-            return result;
+            return object_count_;
         }
     };
 
-    template<typename Underlying>
-    ObjectConstructor<PV<Underlying> >
-    construct(const std::string & name)
+    AOTable objs;
+
+    struct Snapshot_Data : public AOTable {
+        template<typename AO>
+        AO * construct()
+        {
+            auto_ptr<AO> result(new AO());
+            push_back(result.get());
+            return result.release();
+        }
+
+        template<typename AO, typename Arg1>
+        AO * construct(const Arg1 & arg1)
+        {
+            auto_ptr<AO> result(new AO(arg1));
+            push_back(result.get());
+            return result.release();
+        }
+    };
+
+    const Snapshot_Data * ss_data() const
     {
-        size_t size = sizeof(Underlying);
-        void * mem = backing.construct<char>[size]();
-        return ObjectConstructor(mem, size, this);
+        if (!current_trans) no_transaction_exception(this);
+
+        PersistentObjectStore * ncthis
+            = const_cast<PersistentObjectStore *>(this);
+        Snapshot_Data * result
+            = current_trans->local_value<Snapshot_Data>(ncthis);
+        if (!result)
+            result
+                = current_trans
+                ->local_value<Snapshot_Data>(ncthis, Snapshot_Data());
+        return result;
     }
 
+    Snapshot_Data * ss_data()
+    {
+        if (!current_trans) no_transaction_exception(this);
+        Snapshot_Data * result
+            = current_trans->local_value<Snapshot_Data>(this);
+        if (!result)
+            result
+                = current_trans
+                ->local_value<Snapshot_Data>(this, Snapshot_Data());
+        return result;
+    }
+
+    template<typename Underlying>
+    AORef<Underlying>
+    construct()
+    {
+        Snapshot_Data * sd = ss_data();
+        return sd->construct<TypedAO<Underlying> >();
+    }
+
+    template<typename Underlying, typename Arg1>
+    AORef<Underlying>
+    construct(const Arg1 & arg1)
+    {
+        Snapshot_Data * sd = ss_data();
+        return sd->construct<TypedAO<Underlying> >(arg1);
+    }
+
+    size_t object_count() const
+    {
+        const Snapshot_Data * sd = ss_data();
+        return objs.object_count() + sd->object_count();
+    }
     
+
     /*************************************************************************/
     /* ALLOCATION                                                            */
     /*************************************************************************/
@@ -333,6 +397,56 @@ struct PersistentObjectStore
     // Change the journal mode
     void set_journal_mode(Journal_Mode mode, float time = 0.0f);
 
+
+    /*************************************************************************/
+    /* VERSIONED_OBJECT INTERFACE                                            */
+    /*************************************************************************/
+
+    // Get the commit ready and check that everything can go ahead, but
+    // don't actually perform the commit
+    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * data)
+    {
+        // 1.  Allocate persistent memory for the new value
+        
+        // 2.  Allocate heap memory for the new internal data structure
+
+        // 3.  Success
+        throw Exception("not implemented");
+    }
+
+    // Confirm a setup commit, making it permanent
+    virtual void commit(Epoch new_epoch) throw ()
+    {
+        // 1.  Serialize the new value in the new memory
+
+        // 2.  Switch the pointer to point to the new memory
+
+        // 3.  Arrange for the old memory to be freed once everything has made
+        //     a critical section transition
+        throw Exception("not implemented");
+    }
+
+    // Roll back a setup commit
+    virtual void rollback(Epoch new_epoch, void * data) throw ()
+    {
+        // 1.  Deallocate the memory from the owner in the mmap range
+        throw Exception("not implemented");
+    }
+
+    // Clean up an unused version
+    virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch)
+    {
+        throw Exception("not implemented");
+    }
+    
+    // Rename an epoch to a different number.  Returns the valid_from value
+    // of the next epoch in the set.
+    virtual Epoch rename_epoch(Epoch old_valid_from,
+                               Epoch new_valid_from) throw ()
+    {
+        throw Exception("not implemented");
+    }
+
 private:
     managed_mapped_file backing;
 
@@ -353,15 +467,22 @@ BOOST_AUTO_TEST_CASE( test1 )
     {
         Local_Transaction trans;
         // Two persistent versioned objects
-        PV<int> obj1 = store.construct<int>("obj1")(0);
-        PV<int> obj2 = store.construct<int>("obj2")(1);
+        AORef<int> obj1 = store.construct<int>(0);
+        AORef<int> obj2 = store.construct<int>(1);
         
-        BOOST_CHECK_EQUAL(obj1.read(), 0);
-        BOOST_CHECK_EQUAL(obj2.read(), 1);
+        BOOST_CHECK_EQUAL(obj1, 0);
+        BOOST_CHECK_EQUAL(obj2, 1);
 
         BOOST_CHECK_EQUAL(store.object_count(), 2);
 
         // Don't commit the transaction
+    }
+
+    {
+        Local_Transaction trans;
+
+        // Make sure the objects didn't get committed
+        BOOST_CHECK_EQUAL(store.object_count(), 0);
     }
 }
 
