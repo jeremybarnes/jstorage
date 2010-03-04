@@ -21,7 +21,285 @@ namespace JMVCC {
 
 
 /*****************************************************************************/
-/* VERSIONED                                                                 */
+/* VERSION_TABLE                                                             */
+/*****************************************************************************/
+
+template<typename T>
+struct Version_Table {
+
+    // This structure provides a list of values.  Each one is tagged with the
+    // earliest epoch in which it is valid.  The latest epoch in which it is
+    // valid + 1 is that of the next entry in the list; that in current has no
+    // latest epoch.
+
+    struct Entry {
+        explicit Entry(Epoch valid_to = 1, const T & value = T())
+            : valid_to(valid_to), value(value)
+        {
+        }
+        
+        Epoch valid_to;
+        T value;
+    };
+
+    Version_Table(size_t capacity)
+        : capacity(capacity), first(0), last(0)
+    {
+    }
+
+    Version_Table(size_t capacity, const Version_Table & old_version_table)
+        : capacity(capacity), first(0), last(0)
+    {
+        for (unsigned i = 0;  i < old_version_table.size();  ++i)
+            push_back(old_version_table.element(i));
+    }
+
+    uint32_t capacity;   // Number allocated
+    uint32_t first;      // Index of first valid entry
+    uint32_t last;       // Index of last valid entry
+    Entry history[1];  // real ones are allocated after
+
+    uint32_t size() const { return last - first; }
+
+    ~Version_Table()
+    {
+        size_t sz = size();
+        for (unsigned i = 0;  i < sz;  ++i)
+            history[i].value.~T();
+    }
+
+    /// Return the value for the given epoch
+    const T & value_at_epoch(Epoch epoch) const
+    {
+        for (int i = last - 1;  i > first;  --i) {
+            Epoch valid_from = history[i - 1].valid_to;
+            if (epoch >= valid_from)
+                return history[i].value;
+        }
+            
+        return history[first].value;
+    }
+        
+    Version_Table * copy(size_t new_capacity) const
+    {
+        if (new_capacity < size())
+            throw Exception("new capacity is wrong");
+
+        return create(*this, new_capacity);
+    }
+
+    Entry & front()
+    {
+        return history[first];
+    }
+
+    const Entry & front() const
+    {
+        return history[first];
+    }
+
+    void pop_back()
+    {
+        if (size() < 2)
+            throw Exception("popping back last element");
+        --last;
+        // Need to: make sure that garbage collection runs its destructor
+    }
+
+    void push_back(Epoch valid_to, const T & val)
+    {
+        push_back(Entry(valid_to, val));
+    }
+
+    void push_back(const Entry & entry)
+    {
+        if (last == capacity) {
+            using namespace std;
+            cerr << "last = " << last << endl;
+            cerr << "capacity = " << capacity << endl;
+            throw Exception("can't push back");
+        }
+        new (&history[last].value) T(entry.value);
+        history[last].valid_to = entry.valid_to;
+            
+        memory_barrier();
+
+        ++last;
+    }
+        
+    const Entry & back() const
+    {
+        return history[last - 1];
+    }
+
+    Entry & back()
+    {
+        return history[last - 1];
+    }
+
+    Entry & element(int index)
+    {
+        if (index < 0 || index >= size())
+            throw Exception("invalid element");
+        return history[first + index];
+    }
+
+    const Entry & element(int index) const
+    {
+        if (index < 0 || index >= size())
+            throw Exception("invalid element");
+        return history[first + index];
+    }
+
+    struct Deleter {
+        Deleter(Version_Table * version_table)
+            : version_table(version_table)
+        {
+        }
+
+        void operator () ()
+        {
+            version_table->~Version_Table();
+            ::free(version_table);
+        }
+
+        Version_Table * version_table;
+    };
+
+    static void free(Version_Table * version_table)
+    {
+        schedule_cleanup(Deleter(version_table));
+    }
+
+    static void free_now(Version_Table * version_table)
+    {
+        Deleter do_it(version_table);
+        do_it();
+    }
+
+    static Version_Table * create(size_t capacity)
+    {
+        // TODO: exception safety...
+        void * d = malloc(sizeof(Version_Table) + capacity * sizeof(Entry));
+        Version_Table * d2 = new (d) Version_Table(capacity);
+        return d2;
+    }
+
+    static Version_Table * create(const T & val, size_t capacity)
+    {
+        // TODO: exception safety...
+        void * d = malloc(sizeof(Version_Table) + capacity * sizeof(Entry));
+        Version_Table * d2 = new (d) Version_Table(capacity);
+        d2->push_back(Entry(1,  val));
+        return d2;
+    }
+
+    static Version_Table * create(const Version_Table & old, size_t capacity)
+    {
+        // TODO: exception safety...
+        void * d = malloc(sizeof(Version_Table) + capacity * sizeof(Entry));
+        Version_Table * d2 = new (d) Version_Table(capacity, old);
+        return d2;
+    }
+
+    Version_Table * cleanup(Epoch unused_valid_from) const
+    {
+        Version_Table * version_table2 = create(size());
+        
+        // Copy them, skipping the one that matched
+        
+        // TODO: optimize
+        Epoch valid_from = 1;
+        bool found = false;
+        for (unsigned i = first, e = last, j = 0; i != e;  ++i) {
+            //cerr << "i = " << i << " e = " << e << " j = " << j
+            //     << " element = " << history[i].value << " valid to "
+            //     << history[i].valid_to << " found = "
+            //     << found << " valid_from = " << valid_from << endl;
+            //cerr << "version_table2->size() = " << version_table2->size() << endl;
+            
+            if (valid_from == unused_valid_from
+                || (i == first
+                    && unused_valid_from < front().valid_to)) {
+                //cerr << "  removing" << endl;
+                if (found)
+                    throw Exception("two with the same valid_from value");
+                found = true;
+                if (j != 0)
+                    version_table2->history[j - 1].valid_to = history[i].valid_to;
+            }
+            else {
+                // Copy element i to element j
+                new (&version_table2->history[j].value) T(history[i].value);
+                version_table2->history[j].valid_to = history[i].valid_to;
+                ++j;
+                ++version_table2->last;
+            }
+            
+            valid_from = history[i].valid_to;
+        }
+        
+        if (!found) {
+            free_now(version_table2);
+            return 0;
+        }
+
+        if (size() != version_table2->size() + 1)
+            throw Exception("sizes were wrong");
+
+        return version_table2;
+    }
+
+    std::pair<Version_Table *, Epoch>
+    rename_epoch(Epoch old_valid_from, Epoch new_valid_from) const
+    {
+        int s = size();
+        
+        if (first != 0)
+            throw Exception("can't work with first != 0");
+        
+        if (s == 0)
+            throw Exception("renaming with no values");
+        
+        if (old_valid_from < history[0].valid_to) {
+            // The last one doesn't have a valid_from, so we assume that
+            // it's ok and leave it.
+            Epoch e = (s == 2 ? history[1].valid_to : 0);
+            return std::make_pair(const_cast<Version_Table *>(this), e);
+        }
+        
+        // This is subtle.  Since we have valid_to values stored and not
+        // valid_from values, we need to find the particular one and change
+        // it.
+        
+        // TODO: maybe we could modify in place???
+        Version_Table * d2 = create(*this, capacity);
+        
+        // TODO: optimize
+        Epoch result = 0;
+        bool found = false;
+        for (unsigned i = 0;  i != s;  ++i) {
+            if (d2->history[i].valid_to != old_valid_from) continue;
+            d2->history[i].valid_to = new_valid_from;
+            found = true;
+            if (i == s - 3)
+                result = d2->history[s - 2].valid_to;
+            break;
+        }
+
+        if (!found) {
+            free_now(d2);
+            d2 = 0;
+        }
+
+        return std::make_pair(d2, result);
+    }
+
+};
+
+
+/*****************************************************************************/
+/* VERSIONED2                                                                */
 /*****************************************************************************/
 
 /** This template takes an underlying type and turns it into a versioned
@@ -39,12 +317,12 @@ struct Versioned2 : public Versioned_Object {
     explicit Versioned2(const T & val = T())
     {
         //static Info info;
-        data = new_data(val, 1);
+        version_table = VT::create(val, 1);
     }
 
     ~Versioned2()
     {
-        delete_data(const_cast<Data *>(get_data()));
+        VT::free(const_cast<VT *>(vt()));
     }
 
     // Client interface.  Just two methods to get at the current value.
@@ -56,7 +334,8 @@ struct Versioned2 : public Versioned_Object {
         if (!local) {
             T value;
             {
-                value = get_data()->value_at_epoch(current_trans->epoch());
+                value = vt()
+                    ->value_at_epoch(current_trans->epoch());
             }
             local = current_trans->local_value<T>(this, value);
             
@@ -74,16 +353,14 @@ struct Versioned2 : public Versioned_Object {
     
     const T read() const
     {
-        if (!current_trans) {
+        if (!current_trans)
             throw Exception("reading outside a transaction");
-            //T result = d->value_at_epoch(get_current_epoch());
-            //return result;
-        }
+
         const T * val = current_trans->local_value<T>(this);
         
         if (val) return *val;
         
-        const Data * d = get_data();
+        const VT * d = vt();
 
         T result = d->value_at_epoch(current_trans->epoch());
         return result;
@@ -91,207 +368,25 @@ struct Versioned2 : public Versioned_Object {
 
     size_t history_size() const
     {
-        size_t result = get_data()->size() - 1;
+        size_t result = vt()->size() - 1;
         return result;
     }
 
 private:
-    // This structure provides a list of values.  Each one is tagged with the
-    // earliest epoch in which it is valid.  The latest epoch in which it is
-    // valid + 1 is that of the next entry in the list; that in current has no
-    // latest epoch.
+    // Internal version_table object allocated for when we have more than one
+    // version
+    typedef Version_Table<T> VT;
 
-    struct Entry {
-        explicit Entry(Epoch valid_to = 1, const T & value = T())
-            : valid_to(valid_to), value(value)
-        {
-        }
+    // The single internal version_table member.  Updated atomically.
+    mutable VT * version_table;
 
-        Epoch valid_to;
-        T value;
-    };
-
-    // Internal data object allocated for when we have more than one version
-    struct Data {
-        Data(size_t capacity)
-            : capacity(capacity), first(0), last(0)
-        {
-        }
-
-        Data(size_t capacity, const Data & old_data)
-            : capacity(capacity), first(0), last(0)
-        {
-            for (unsigned i = 0;  i < old_data.size();  ++i)
-                push_back(old_data.element(i));
-        }
-
-        uint32_t capacity;   // Number allocated
-        uint32_t first;      // Index of first valid entry
-        uint32_t last;       // Index of last valid entry
-        Entry history[1];  // real ones are allocated after
-
-        uint32_t size() const { return last - first; }
-
-        ~Data()
-        {
-            size_t sz = size();
-            for (unsigned i = 0;  i < sz;  ++i)
-                history[i].value.~T();
-        }
-
-        /// Return the value for the given epoch
-        const T & value_at_epoch(Epoch epoch) const
-        {
-            for (int i = last - 1;  i > first;  --i) {
-                Epoch valid_from = history[i - 1].valid_to;
-                if (epoch >= valid_from)
-                    return history[i].value;
-            }
-            
-            return history[first].value;
-        }
-        
-        Data * copy(size_t new_capacity) const
-        {
-            if (new_capacity < size())
-                throw Exception("new capacity is wrong");
-
-            return new_data(*this, new_capacity);
-        }
-
-        Entry & front()
-        {
-            return history[first];
-        }
-
-        const Entry & front() const
-        {
-            return history[first];
-        }
-
-        void pop_back()
-        {
-            if (size() < 2)
-                throw Exception("popping back last element");
-            --last;
-            // Need to: make sure that garbage collection runs its destructor
-        }
-
-        void push_back(const Entry & entry)
-        {
-            if (last == capacity) {
-                using namespace std;
-                cerr << "last = " << last << endl;
-                cerr << "capacity = " << capacity << endl;
-                throw Exception("can't push back");
-            }
-            new (&history[last].value) T(entry.value);
-            history[last].valid_to = entry.valid_to;
-            
-            memory_barrier();
-
-            ++last;
-        }
-        
-        const Entry & back() const
-        {
-            return history[last - 1];
-        }
-
-        Entry & back()
-        {
-            return history[last - 1];
-        }
-
-        Entry & element(int index)
-        {
-            if (index < 0 || index >= size())
-                throw Exception("invalid element");
-            return history[first + index];
-        }
-
-        const Entry & element(int index) const
-        {
-            if (index < 0 || index >= size())
-                throw Exception("invalid element");
-            return history[first + index];
-        }
-
-        size_t checksum() const
-        {
-            const unsigned * vals = reinterpret_cast<const unsigned *>(this);
-            const unsigned * vals2 
-                = reinterpret_cast<const unsigned *>(&history[capacity]);
-
-            size_t total = 0;
-            for (; vals != vals2;  ++vals)
-                total = total * 5 + (*vals);
-
-            return total;
-        }
-    };
-
-    // The single internal data member.  Updated atomically.
-    mutable Data * data;
-
-    const Data * get_data() const
+    const VT * vt() const
     {
-        return reinterpret_cast<const Data *>(data);
+        return reinterpret_cast<const VT *>(version_table);
     }
 
-    struct Delete_Data {
-        Delete_Data(Data * data)
-            : data(data), epoch(get_current_epoch())
-        {
-        }
-
-        void operator () ()
-        {
-            data->~Data();
-            free(data);
-        }
-
-        Data * data;
-        Epoch epoch;
-    };
-
-    static void delete_data(Data * data)
-    {
-        schedule_cleanup(Delete_Data(data));
-    }
-
-    static void delete_data_now(Data * data)
-    {
-        Delete_Data do_it(data);
-        do_it();
-    }
-
-    static Data * new_data(size_t capacity)
-    {
-        // TODO: exception safety...
-        void * d = malloc(sizeof(Data) + capacity * sizeof(Entry));
-        Data * d2 = new (d) Data(capacity);
-        return d2;
-    }
-
-    static Data * new_data(const T & val, size_t capacity)
-    {
-        // TODO: exception safety...
-        void * d = malloc(sizeof(Data) + capacity * sizeof(Entry));
-        Data * d2 = new (d) Data(capacity);
-        d2->push_back(Entry(1,  val));
-        return d2;
-    }
-
-    static Data * new_data(const Data & old, size_t capacity)
-    {
-        // TODO: exception safety...
-        void * d = malloc(sizeof(Data) + capacity * sizeof(Entry));
-        Data * d2 = new (d) Data(capacity, old);
-        return d2;
-    }
-
-    bool set_data(const Data * & old_data, Data * new_data)
+    bool set_version_table(const VT * & old_version_table,
+                           VT * new_version_table)
     {
         // For the moment, the commit lock is held when we update this, so
         // there is no possibility of conflict.  But if ever we decide to
@@ -299,12 +394,12 @@ private:
         // to do it atomically.
         memory_barrier();
 
-        bool result = cmp_xchg(reinterpret_cast<Data * &>(data),
-                               const_cast<Data * &>(old_data),
-                               new_data);
+        bool result = cmp_xchg(reinterpret_cast<VT * &>(version_table),
+                               const_cast<VT * &>(old_version_table),
+                               new_version_table);
 
-        if (!result) delete_data_now(new_data);
-        else delete_data(const_cast<Data *>(old_data));
+        if (!result) VT::free_now(new_version_table);
+        else VT::free(const_cast<VT *>(old_version_table));
 
         return result;
     }
@@ -315,7 +410,7 @@ public:
     virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
     {
         for (;;) {
-            const Data * d = get_data();
+            const VT * d = vt();
 
             if (new_epoch != get_current_epoch() + 1)
                 throw Exception("epochs out of order");
@@ -327,18 +422,18 @@ public:
             if (valid_from > old_epoch)
                 return false;  // something updated before us
             
-            Data * new_data = d->copy(d->size() + 1);
-            new_data->back().valid_to = new_epoch;
-            new_data->push_back(Entry(1 /* valid_to */,
-                                      *reinterpret_cast<T *>(new_value)));
+            VT * new_version_table = d->copy(d->size() + 1);
+            new_version_table->back().valid_to = new_epoch;
+            new_version_table->push_back(1 /* valid_to */,
+                                      *reinterpret_cast<T *>(new_value));
             
-            if (set_data(d, new_data)) return true;
+            if (set_version_table(d, new_version_table)) return true;
         }
     }
 
     virtual void commit(Epoch new_epoch) throw ()
     {
-        const Data * d = get_data();
+        const VT * d = vt();
 
         // Now that it's definitive, we have an older entry to clean up
         Epoch valid_from = 1;
@@ -348,20 +443,20 @@ public:
         snapshot_info.register_cleanup(this, valid_from);
     }
 
-    virtual void rollback(Epoch new_epoch, void * local_data) throw ()
+    virtual void rollback(Epoch new_epoch, void * local_version_table) throw ()
     {
-        const Data * d = get_data();
+        const VT * d = vt();
 
         for (;;) {
-            Data * d2 = d->copy(d->size());
+            VT * d2 = d->copy(d->size());
             d2->pop_back();
-            if (set_data(d, d2)) return;
+            if (set_version_table(d, d2)) return;
         }
     }
 
     virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch)
     {
-        const Data * d = get_data();
+        const VT * d = vt();
 
         for (;;) {
 
@@ -372,59 +467,11 @@ public:
                 cerr << "current_epoch = " << get_current_epoch() << endl;
                 throw Exception("cleaning up with no values to clean up");
             }
+
             
-            using namespace std;
-            //cerr << "cleaning up: unused_valid_from = " << unused_valid_from
-            //     << " trigger_epoch = " << trigger_epoch << endl;
-            
-            //dump_unlocked();
-            
-            //cerr << "not in first one" << endl;
-            
-            Data * data2 = new_data(d->size());
-            
-            // Copy them, skipping the one that matched
-            
-            // TODO: optimize
-            Epoch valid_from = 1;
-            bool found = false;
-            for (unsigned i = d->first, e = d->last, j = 0; i != e;  ++i) {
-                //cerr << "i = " << i << " e = " << e << " j = " << j
-                //     << " element = " << d->history[i].value << " valid to "
-                //     << d->history[i].valid_to << " found = "
-                //     << found << " valid_from = " << valid_from << endl;
-                //cerr << "data2->size() = " << data2->size() << endl;
-                
-                if (valid_from == unused_valid_from
-                    || (i == d->first
-                        && unused_valid_from < d->front().valid_to)) {
-                    //cerr << "  removing" << endl;
-                    if (found)
-                        throw Exception("two with the same valid_from value");
-                    found = true;
-                    if (j != 0)
-                        data2->history[j - 1].valid_to = d->history[i].valid_to;
-                }
-                else {
-                    // Copy element i to element j
-                    new (&data2->history[j].value) T(d->history[i].value);
-                    data2->history[j].valid_to = d->history[i].valid_to;
-                    ++j;
-                    ++data2->last;
-                }
-                
-                valid_from = d->history[i].valid_to;
-            }
-            
-            if (found) {
-                if (d->size() != data2->size() + 1) {
-                    cerr << "d->size() = " << d->size() << endl;
-                    cerr << "data2->size() = " << data2->size() << endl;
-                    dump_unlocked();
-                    throw Exception("sizes were wrong");
-                }
-                
-                if (set_data(d, data2)) return;
+            VT * result = d->cleanup(unused_valid_from);
+            if (result) {
+                if (set_version_table(d, result)) return;
                 continue;
             }
             
@@ -444,49 +491,16 @@ public:
     virtual Epoch rename_epoch(Epoch old_valid_from, Epoch new_valid_from)
         throw ()
     {
-        const Data * d = get_data();
+        const VT * d = vt();
 
         for (;;) {
+            std::pair<VT *, Epoch> result
+                = d->rename_epoch(old_valid_from, new_valid_from);
 
-            int s = d->size();
-
-            if (d->first != 0)
-                throw Exception("can't work with first != 0");
-
-            if (s == 0)
-                throw Exception("renaming with no values");
-            
-            if (old_valid_from < d->history[0].valid_to) {
-                // The last one doesn't have a valid_from, so we assume that
-                // it's ok and leave it.
-                if (s == 2)
-                    return d->history[1].valid_to;
-                else return 0;
-            }
-
-            // This is subtle.  Since we have valid_to values stored and not
-            // valid_from values, we need to find the particular one and change
-            // it.
-            
-            // TODO: maybe we could modify in place???
-            Data * d2 = new_data(*d, d->capacity);
-
-            // TODO: optimize
-            int result = 0;
-            bool found = false;
-            for (unsigned i = 0;  i != s;  ++i) {
-                if (d2->history[i].valid_to != old_valid_from) continue;
-                d2->history[i].valid_to = new_valid_from;
-                found = true;
-                if (i == s - 3)
-                    result = d2->history[s - 2].valid_to;
-                break;
-            }
-
-            if (!found)
+            if (!result.first)
                 throw Exception("not found");
 
-            if (set_data(d, d2)) return result;
+            if (set_version_table(d, result.first)) return result.second;
         }
     }
 
@@ -503,7 +517,7 @@ public:
 
     void dump_itl(std::ostream & stream, int indent = 0) const
     {
-        const Data * d = get_data();
+        const VT * d = vt();
 
         using namespace std;
         std::string s(indent, ' ');
@@ -511,7 +525,7 @@ public:
         stream << s << "history with " << d->size()
                << " values" << endl;
         for (unsigned i = 0;  i < d->size();  ++i) {
-            const Entry & entry = d->element(i);
+            const typename VT::Entry & entry = d->element(i);
             stream << s << "  " << i << ": valid to "
                    << entry.valid_to;
             stream << " addr " << &entry.value;
@@ -528,32 +542,6 @@ public:
     virtual void destroy_local_value(void * val) const
     {
         reinterpret_cast<T *>(val)->~T();
-    }
-
-    virtual void validate() const
-    {
-#if 0
-        ssize_t e = 0;  // epoch we are up to
-        
-        for (unsigned i = 0;  i < history.size();  ++i) {
-            Epoch e2 = history[i].valid_to;
-            if (e2 > get_current_epoch() + 1) {
-                using namespace std;
-                cerr << "e = " << e << " e2 = " << e2 << endl;
-                dump();
-                cerr << "invalid current epoch" << endl;
-                throw Exception("invalid current epoch");
-            }
-            if (e2 <= e) {
-                using namespace std;
-                cerr << "e = " << e << " e2 = " << e2 << endl;
-                dump();
-                cerr << "invalid epoch order" << endl;
-                throw Exception("invalid epoch order");
-            }
-            e = e2;
-        }
-#endif
     }
 };
 
