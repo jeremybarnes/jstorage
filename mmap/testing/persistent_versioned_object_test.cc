@@ -106,7 +106,7 @@ struct TypedAO
         T * local = current_trans->local_value<T>(this);
 
         if (!local) {
-            T * value = value_at_epoch(current_trans->epoch());
+            const T * value = value_at_epoch(current_trans->epoch());
             local = current_trans->local_value<T>(this, *value);
             
             if (!local)
@@ -149,7 +149,7 @@ struct TypedAO
 private:
     const T * value_at_epoch(Epoch epoch) const
     {
-        
+        return vt()->value_at_epoch(epoch);
     }
 
     // Internal version_table object allocated for when we have more than one
@@ -322,6 +322,93 @@ public:
 
 
 /*****************************************************************************/
+/* AOTABLE                                                                   */
+/*****************************************************************************/
+
+/** A table of addressable objects.  Performs the mapping between an object
+    ID and an offset in the file.  This is itself a versioned object.
+*/
+
+struct AOEntry {
+    AOEntry()
+        : local(0)
+    {
+    }
+
+    AOEntry(AddressableObject * local)
+        : local(local)
+    {
+    }
+        
+    union {
+        struct {
+            uint64_t offset;
+        };
+        uint64_t bits;
+    };
+        
+    AddressableObject * local;
+};
+
+/** The addressable objects table for a single snapshot (ie no version
+    control). */
+struct AOTableVersion : public std::vector<AOEntry> {
+    AOTableVersion()
+        : object_count_(0)
+    {
+    }
+
+    ~AOTableVersion()
+    {
+        for (const_iterator it = begin(), e = end(); it != e;  ++it)
+            delete it->local;
+    }
+
+    void add(AddressableObject * local)
+    {
+        push_back(AOEntry(local));
+        ++object_count_;
+    }
+
+    size_t object_count_;
+
+    size_t object_count() const
+    {
+        return object_count_;
+    }
+};
+
+inline std::ostream &
+operator << (std::ostream & stream, const AOTableVersion & ver)
+{
+    return stream;
+}
+
+struct AOTable : public TypedAO<AOTableVersion> {
+    template<typename AO>
+    AO * construct()
+    {
+        auto_ptr<AO> result(new AO());
+        mutate().add(result.get());
+        return result.release();
+    }
+    
+    template<typename AO, typename Arg1>
+    AO * construct(const Arg1 & arg1)
+    {
+        auto_ptr<AO> result(new AO(arg1));
+        mutate().add(result.get());
+        return result.release();
+    }
+
+    size_t object_count() const
+    {
+        return read().object_count();
+    }
+};
+
+
+/*****************************************************************************/
 /* AOREF                                                                     */
 /*****************************************************************************/
 
@@ -397,141 +484,27 @@ struct PersistentObjectStore
         disappeared.
     */
 
-    struct AOEntry {
-        AOEntry()
-            : local(0)
-        {
-        }
-
-        AOEntry(AddressableObject * local)
-            : local(local)
-        {
-        }
-        
-        union {
-            struct {
-                uint64_t offset;
-            };
-            uint64_t bits;
-        };
-        
-        AddressableObject * local;
-    };
-    
-    // TODO: should be able to live on the heap (for snapshots) or in a file
-    struct AOTable : public std::vector<AOEntry> {
-        AOTable()
-            : object_count_(0)
-        {
-        }
-
-        ~AOTable()
-        {
-            for (const_iterator it = begin(), e = end(); it != e;  ++it)
-                delete it->local;
-        }
-
-        size_t object_count_;
-
-        size_t object_count() const
-        {
-            return object_count_;
-        }
-    };
-
     AOTable objs;
-
-    struct Snapshot_Data : public AOTable {
-        template<typename AO>
-        AO * construct()
-        {
-            auto_ptr<AO> result(new AO());
-            push_back(result.get());
-            return result.release();
-        }
-
-        template<typename AO, typename Arg1>
-        AO * construct(const Arg1 & arg1)
-        {
-            auto_ptr<AO> result(new AO(arg1));
-            push_back(result.get());
-            return result.release();
-        }
-    };
-
-    const Snapshot_Data * ss_data() const
-    {
-        if (!current_trans) no_transaction_exception(this);
-
-        PersistentObjectStore * ncthis
-            = const_cast<PersistentObjectStore *>(this);
-        Snapshot_Data * result
-            = current_trans->local_value<Snapshot_Data>(ncthis);
-        if (!result)
-            result
-                = current_trans
-                ->local_value<Snapshot_Data>(ncthis, Snapshot_Data());
-        return result;
-    }
-
-    Snapshot_Data * ss_data()
-    {
-        if (!current_trans) no_transaction_exception(this);
-        Snapshot_Data * result
-            = current_trans->local_value<Snapshot_Data>(this);
-        if (!result)
-            result
-                = current_trans
-                ->local_value<Snapshot_Data>(this, Snapshot_Data());
-        return result;
-    }
 
     template<typename Underlying>
     AORef<Underlying>
     construct()
     {
-        Snapshot_Data * sd = ss_data();
-        return sd->construct<TypedAO<Underlying> >();
+        return objs.construct<TypedAO<Underlying> >();
     }
 
     template<typename Underlying, typename Arg1>
     AORef<Underlying>
     construct(const Arg1 & arg1)
     {
-        Snapshot_Data * sd = ss_data();
-        return sd->construct<TypedAO<Underlying> >(arg1);
-    }
-
-    size_t object_count() const
-    {
-        const Snapshot_Data * sd = ss_data();
-        return objs.object_count() + sd->object_count();
+        return objs.construct<TypedAO<Underlying> >(arg1);
     }
     
-
-    /*************************************************************************/
-    /* ALLOCATION                                                            */
-    /*************************************************************************/
-
-
-
-    /*************************************************************************/
-    /* SNAPSHOTTING                                                          */
-    /*************************************************************************/
-
-    // Sync the snapshot with the on-disk version.  Returns the epoch at which
-    // the snapshot was made.
-    Epoch sync_snapshot() const;
-
-    enum Journal_Mode {
-        JOURNAL_NONE,    ///< No journal; commits lost since last snapshot
-        JOURNAL_TIMED_SYNC,  ///< Journal is kept and synced every n seconds
-        JOURNAL_STRICT       ///< Journal is kept and synced at every trans
-    };
-
-    // Change the journal mode
-    void set_journal_mode(Journal_Mode mode, float time = 0.0f);
-
+    size_t object_count() const
+    {
+        return objs.object_count();
+    }
+    
 
     /*************************************************************************/
     /* VERSIONED_OBJECT INTERFACE                                            */
@@ -596,8 +569,10 @@ private:
 
 BOOST_AUTO_TEST_CASE( test1 )
 {
+    unlink("pvot_backing1");
+
     // The region for persistent objects, as anonymous mapped memory
-    PersistentObjectStore store(create_only, "backing1", 65536);
+    PersistentObjectStore store(create_only, "pvot_backing1", 65536);
 
     {
         Local_Transaction trans;
