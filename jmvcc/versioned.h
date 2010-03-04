@@ -9,6 +9,7 @@
 #define __jmvcc__versioned_h__
 
 #include "jml/utils/circular_buffer.h"
+#include "transaction.h"
 #include "versioned_object.h"
 #include <ace/Synch.h>
 
