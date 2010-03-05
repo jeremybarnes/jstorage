@@ -44,7 +44,7 @@ struct Versioned2 : public Versioned_Object {
 
     ~Versioned2()
     {
-        VT::free(const_cast<VT *>(vt()));
+        VT::free(const_cast<VT *>(vt()), true /* last_copy */);
     }
 
     // Client interface.  Just two methods to get at the current value.
@@ -116,8 +116,9 @@ private:
                                const_cast<VT * &>(old_version_table),
                                new_version_table);
 
-        if (!result) VT::free_now(new_version_table);
-        else VT::free(const_cast<VT *>(old_version_table));
+        if (!result) VT::free_now(new_version_table, false /* last_copy */);
+        else VT::free(const_cast<VT *>(old_version_table),
+                      false /* last_copy */);
 
         return result;
     }
@@ -161,7 +162,7 @@ public:
         snapshot_info.register_cleanup(this, valid_from);
     }
 
-    virtual void rollback(Epoch new_epoch, void * local_version_table) throw ()
+    virtual void rollback(Epoch new_epoch, void * local_data) throw ()
     {
         const VT * d = vt();
 
