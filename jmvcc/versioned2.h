@@ -43,23 +43,22 @@ struct Version_Table {
     };
 
     Version_Table(size_t capacity)
-        : capacity(capacity), first(0), last(0)
+        : capacity(capacity), last(0)
     {
     }
 
     Version_Table(size_t capacity, const Version_Table & old_version_table)
-        : capacity(capacity), first(0), last(0)
+        : capacity(capacity), last(0)
     {
         for (unsigned i = 0;  i < old_version_table.size();  ++i)
             push_back(old_version_table.element(i));
     }
 
     uint32_t capacity;   // Number allocated
-    uint32_t first;      // Index of first valid entry
     uint32_t last;       // Index of last valid entry
     Entry history[1];  // real ones are allocated after
 
-    uint32_t size() const { return last - first; }
+    uint32_t size() const { return last; }
 
     ~Version_Table()
     {
@@ -71,13 +70,13 @@ struct Version_Table {
     /// Return the value for the given epoch
     const T & value_at_epoch(Epoch epoch) const
     {
-        for (int i = last - 1;  i > first;  --i) {
+        for (int i = last - 1;  i > 0;  --i) {
             Epoch valid_from = history[i - 1].valid_to;
             if (epoch >= valid_from)
                 return history[i].value;
         }
             
-        return history[first].value;
+        return history[0].value;
     }
         
     Version_Table * copy(size_t new_capacity) const
@@ -90,12 +89,12 @@ struct Version_Table {
 
     Entry & front()
     {
-        return history[first];
+        return history[0];
     }
 
     const Entry & front() const
     {
-        return history[first];
+        return history[0];
     }
 
     void pop_back()
@@ -141,14 +140,14 @@ struct Version_Table {
     {
         if (index < 0 || index >= size())
             throw Exception("invalid element");
-        return history[first + index];
+        return history[index];
     }
 
     const Entry & element(int index) const
     {
         if (index < 0 || index >= size())
             throw Exception("invalid element");
-        return history[first + index];
+        return history[index];
     }
 
     struct Deleter {
@@ -211,7 +210,7 @@ struct Version_Table {
         // TODO: optimize
         Epoch valid_from = 1;
         bool found = false;
-        for (unsigned i = first, e = last, j = 0; i != e;  ++i) {
+        for (unsigned i = 0, e = last, j = 0; i != e;  ++i) {
             //cerr << "i = " << i << " e = " << e << " j = " << j
             //     << " element = " << history[i].value << " valid to "
             //     << history[i].valid_to << " found = "
@@ -219,7 +218,7 @@ struct Version_Table {
             //cerr << "version_table2->size() = " << version_table2->size() << endl;
             
             if (valid_from == unused_valid_from
-                || (i == first
+                || (i == 0
                     && unused_valid_from < front().valid_to)) {
                 //cerr << "  removing" << endl;
                 if (found)
@@ -254,9 +253,6 @@ struct Version_Table {
     rename_epoch(Epoch old_valid_from, Epoch new_valid_from) const
     {
         int s = size();
-        
-        if (first != 0)
-            throw Exception("can't work with first != 0");
         
         if (s == 0)
             throw Exception("renaming with no values");
