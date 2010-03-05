@@ -180,6 +180,28 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory2 )
     BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
 }
 
+BOOST_AUTO_TEST_CASE( test_version_table_memory3 )
+{
+    typedef Version_Table<Obj, No_Cleanup<Obj>, MyAlloc> VT;
+    MyAllocData alloc;
+
+    constructed = destroyed = 0;
+
+    VT * vt = VT::create(10, alloc);
+    vt->push_back(0, 1);
+    vt->push_back(1, 2);
+    vt->pop_back(NEVER_PUBLISHED);
+
+    BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+
+    VT::free(vt);
+    
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
+    BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
+}
+
 BOOST_AUTO_TEST_CASE( test_version_table_memory_with_copy )
 {
     typedef Version_Table<Obj, No_Cleanup<Obj>, MyAlloc> VT;
@@ -224,6 +246,35 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory_with_copy2 )
     size_t new_outstanding = constructed - destroyed;
     BOOST_CHECK_EQUAL(old_outstanding, new_outstanding);
 
+    VT::free(vt);
+
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
+    BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
+}
+
+BOOST_AUTO_TEST_CASE( test_version_table_memory_with_copy3 )
+{
+    typedef Version_Table<Obj, No_Cleanup<Obj>, MyAlloc> VT;
+    MyAllocData alloc;
+
+    constructed = destroyed = 0;
+
+    VT * vt = VT::create(10, alloc);
+    vt->push_back(0, 1);
+
+    VT * vt2 = VT::create(*vt, 12);
+
+    size_t old_outstanding = constructed - destroyed;
+
+    vt->push_back(1, 2);
+    vt2->push_back(1, 2);
+
+    size_t new_outstanding = constructed - destroyed;
+    BOOST_CHECK_EQUAL(old_outstanding + 2, new_outstanding);
+
+    VT::free(vt2);
     VT::free(vt);
 
     BOOST_CHECK_EQUAL(constructed, destroyed);

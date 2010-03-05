@@ -31,12 +31,21 @@ struct No_Cleanup {
     enum { useful = false };
 };
 
+/** Enum that tells us whether a particular data item has been published or
+    not.  If it has been published, then any cleanup must be deferred.
+    Otherwise, cleanups can happen straight away.
+*/
+enum Published {
+    NEVER_PUBLISHED,
+    PUBLISHED
+};
+
 /*****************************************************************************/
 /* VERSION_TABLE                                                             */
 /*****************************************************************************/
 
 template<typename T, typename ValCleanup = No_Cleanup<T>,
-         typename Allocator = std::allocator<void> >
+         typename Allocator = std::allocator<char> >
 struct Version_Table {
 
     // This structure provides a list of values.  Each one is tagged with the
@@ -80,7 +89,7 @@ struct Version_Table {
         if (new_capacity < size())
             throw Exception("new capacity is wrong");
 
-        return create(*this, new_capacity, itl.allocator);
+        return create(*this, new_capacity);
     }
 
     Entry & front()
@@ -93,12 +102,36 @@ struct Version_Table {
         return history[0];
     }
 
-    void pop_back()
+    struct RunValueDestructor {
+        RunValueDestructor(T & obj)
+            : obj(obj)
+        {
+        }
+        
+        T & obj;
+        
+        void operator () () const
+        {
+            obj.~T();
+        }
+    };
+    
+    void pop_back(Published published = PUBLISHED)
     {
         if (size() < 2)
             throw Exception("popping back last element");
+
+        if (published == PUBLISHED) {
+            RunValueDestructor cleanup(back().value);
+            schedule_cleanup(cleanup);
+        }
+        else {
+            back().value.~T();
+        }
+
         --itl.last;
         // Need to: make sure that garbage collection runs its destructor
+
     }
 
     void push_back(Epoch valid_to, const T & val)
@@ -154,8 +187,13 @@ struct Version_Table {
 
         void operator () ()
         {
+            size_t capacity = version_table->itl.capacity;
+            
+            // TODO: how to avoid destroying the allocator before we use it?
+
             version_table->~Version_Table();
-            version_table->itl.deallocate(version_table);
+            version_table->itl.deallocate
+                (reinterpret_cast<char *>(version_table), capacity);
         }
 
         Version_Table * version_table;
@@ -202,7 +240,7 @@ struct Version_Table {
 
     Version_Table * cleanup(Epoch unused_valid_from) const
     {
-        Version_Table * version_table2 = create(size(), itl.allocator);
+        Version_Table * version_table2 = create(size(), itl);
         
         // Copy them, skipping the one that matched
         
@@ -231,7 +269,7 @@ struct Version_Table {
                 new (&version_table2->history[j].value) T(history[i].value);
                 version_table2->history[j].valid_to = history[i].valid_to;
                 ++j;
-                ++version_table2->last;
+                ++version_table2->itl.last;
             }
             
             valid_from = history[i].valid_to;
@@ -268,7 +306,7 @@ struct Version_Table {
         // it.
         
         // TODO: maybe we could modify in place???
-        Version_Table * d2 = create(*this, itl.capacity, itl.allocator);
+        Version_Table * d2 = create(*this, itl.capacity);
         
         // TODO: optimize
         Epoch result = 0;

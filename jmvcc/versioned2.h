@@ -167,7 +167,7 @@ public:
 
         for (;;) {
             VT * d2 = d->copy(d->size());
-            d2->pop_back();
+            d2->pop_back(NEVER_PUBLISHED);
             if (set_version_table(d, d2)) return;
         }
     }
