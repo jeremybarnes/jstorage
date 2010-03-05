@@ -836,12 +836,18 @@ BOOST_AUTO_TEST_CASE( test_persistence )
         }
 
         BOOST_CHECK_EQUAL(constructed, destroyed + 2);
-        
+    }
+
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+    {
+        // The region for persistent objects, as anonymous mapped memory
+        PersistentObjectStore store(open_only, fname, 65536);
+
         {
             Local_Transaction trans;
             
-            //AORef<Obj> obj1 = store.find<Obj>(oid1);
-            //AORef<Obj> obj2 = store.find<Obj>(oid2);
+            AORef<Obj> obj1 = store.find<Obj>(oid1);
+            AORef<Obj> obj2 = store.find<Obj>(oid2);
 
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
