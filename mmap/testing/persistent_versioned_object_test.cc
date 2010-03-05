@@ -717,7 +717,6 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
 
             print_aos_info();
 
-#if 0
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
             
             AORef<Obj> obj2 = store.construct<Obj>(1);
@@ -730,7 +729,6 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
             BOOST_CHECK_EQUAL(store.object_count(), 2);
             
             // Don't commit the transaction
-#endif
         }
 
         BOOST_CHECK_EQUAL(constructed, destroyed);
