@@ -36,6 +36,8 @@ using namespace std;
 template<typename T>
 struct Versioned : public Versioned_Object {
     typedef ACE_Mutex Mutex;
+
+    typedef T value_type;
     
     explicit Versioned(const T & val = T())
     {

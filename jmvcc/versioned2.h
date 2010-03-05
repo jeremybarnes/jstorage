@@ -36,6 +36,8 @@ namespace JMVCC {
 template<typename T>
 struct Versioned2 : public Versioned_Object {
 
+    typedef T value_type;
+
     explicit Versioned2(const T & val = T())
     {
         //static Info info;

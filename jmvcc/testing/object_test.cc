@@ -29,6 +29,7 @@
 #include "jmvcc/versioned.h"
 #include "jmvcc/versioned2.h"
 #include "jml/arch/demangle.h"
+#include "jml/utils/testing/live_counting_obj.h"
 
 using namespace ML;
 using namespace JMVCC;
@@ -36,7 +37,6 @@ using namespace std;
 
 using boost::unit_test::test_suite;
 
-#if 0
 
 namespace JMVCC {
 
@@ -143,8 +143,6 @@ BOOST_AUTO_TEST_CASE( test0 )
     test0_type<Versioned<int> >();
     test0_type<Versioned2<int> >();
 }
-
-#endif
 
 template<class Var>
 void object_test_thread_x(Var & var, int iter,
@@ -528,6 +526,8 @@ BOOST_AUTO_TEST_CASE( test1 )
 
 template<class Var>
 struct Object_Test_Thread2 {
+    typedef typename Var::value_type Val;
+
     Var * vars;
     int nvars;
     int iter;
@@ -578,8 +578,8 @@ struct Object_Test_Thread2 {
                     cerr << "--------------- end total not zero" << endl;
                 }
 
-                int & val1 = vars[var1].mutate();
-                int & val2 = vars[var2].mutate();
+                Val & val1 = vars[var1].mutate();
+                Val & val2 = vars[var2].mutate();
                     
                 val1 -= 1;
                 val2 += 1;
@@ -604,37 +604,44 @@ void run_object_test2(int nthreads, int niter, int nvals)
     cerr << endl << "testing 2 with " << nthreads << " threads and "
          << niter << " iter"
          << " class " << demangle(typeid(Var).name()) << endl;
-    Var vals[nvals];
-    boost::barrier barrier(nthreads);
-    boost::thread_group tg;
 
-    size_t failures = 0;
+    constructed = destroyed = 0;
 
-    Timer timer;
-    for (unsigned i = 0;  i < nthreads;  ++i)
-        tg.create_thread(Object_Test_Thread2<Var>(vals, nvals, niter,
-                                                  barrier, failures));
-    
-    tg.join_all();
-
-    cerr << "elapsed: " << timer.elapsed() << endl;
-
-    ssize_t total = 0;
     {
-        Local_Transaction trans;
-        for (unsigned i = 0;  i < nvals;  ++i)
-            total += vals[i].read();
+        Var vals[nvals];
+        boost::barrier barrier(nthreads);
+        boost::thread_group tg;
+        
+        size_t failures = 0;
+        
+        Timer timer;
+        for (unsigned i = 0;  i < nthreads;  ++i)
+            tg.create_thread(Object_Test_Thread2<Var>(vals, nvals, niter,
+                                                      barrier, failures));
+        
+        tg.join_all();
+        
+        cerr << "elapsed: " << timer.elapsed() << endl;
+        
+        ssize_t total = 0;
+        {
+            Local_Transaction trans;
+            for (unsigned i = 0;  i < nvals;  ++i)
+                total += vals[i].read();
+        }
+        
+        BOOST_CHECK_EQUAL(snapshot_info.entry_count(), 0);
+        
+        BOOST_CHECK_EQUAL(total, 0);
+        for (unsigned i = 0;  i < nvals;  ++i) {
+            //cerr << "current_epoch = " << get_current_epoch() << endl;
+            if (vals[i].history_size() != 0)
+                vals[i].dump();
+            BOOST_CHECK_EQUAL(vals[i].history_size(), 0);
+        }
     }
 
-    BOOST_CHECK_EQUAL(snapshot_info.entry_count(), 0);
-
-    BOOST_CHECK_EQUAL(total, 0);
-    for (unsigned i = 0;  i < nvals;  ++i) {
-        //cerr << "current_epoch = " << get_current_epoch() << endl;
-        if (vals[i].history_size() != 0)
-            vals[i].dump();
-        BOOST_CHECK_EQUAL(vals[i].history_size(), 0);
-    }
+    BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
 
@@ -653,6 +660,32 @@ BOOST_AUTO_TEST_CASE( test2 )
     run_object_test2<Versioned2<int> >(100, 1000, 10);
     run_object_test2<Versioned<int> >(1000, 100, 100);
     run_object_test2<Versioned2<int> >(1000, 100, 100);
+
+    boost::timer t;
+    run_object_test2<Versioned<int> >(1, 1000000, 1);
+    cerr << "elapsed for 1000000 iterations: " << t.elapsed() << endl;
+    cerr << "for 2^32 iterations: " << (1ULL << 32) / 1000000.0 * t.elapsed()
+         << "s" << endl;
+
+    t.restart();
+    run_object_test2<Versioned2<int> >(1, 1000000, 1);
+    cerr << "elapsed for 1000000 iterations: " << t.elapsed() << endl;
+    cerr << "for 2^32 iterations: " << (1ULL << 32) / 1000000.0 * t.elapsed()
+         << "s" << endl;
+}
+
+BOOST_AUTO_TEST_CASE( test_all_objects_destroyed )
+{
+    cerr << endl << endl << "========= test all objects destroyed" << endl;
+    
+    run_object_test2<Versioned<Obj> > (2,   500,   2);
+    run_object_test2<Versioned2<Obj> >(2,   500,   2);
+    run_object_test2<Versioned<Obj> > (10, 1000, 100);
+    run_object_test2<Versioned2<Obj> >(10, 1000, 100);
+    run_object_test2<Versioned<Obj> > (100, 100,  10);
+    run_object_test2<Versioned2<Obj> >(100, 100,  10);
+    run_object_test2<Versioned<Obj> > (1000, 50, 100);
+    run_object_test2<Versioned2<Obj> >(1000, 50, 100);
 
     boost::timer t;
     run_object_test2<Versioned<int> >(1, 1000000, 1);
