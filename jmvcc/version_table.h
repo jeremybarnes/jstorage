@@ -194,7 +194,8 @@ struct Version_Table {
     static Version_Table * create(const Version_Table & old, size_t capacity)
     {
         // TODO: exception safety...
-        void * d = old.itl.allocator.allocate(sizeof(Version_Table) + capacity * sizeof(Entry));
+        Allocator a(old.itl);
+        void * d = a.allocate(sizeof(Version_Table) + capacity * sizeof(Entry));
         Version_Table * d2 = new (d) Version_Table(capacity, old);
         return d2;
     }
@@ -309,7 +310,7 @@ private:
     }
 
     Version_Table(size_t capacity, const Version_Table & old_version_table)
-        : itl(capacity, old_version_table.itl.allocator)
+        : itl(capacity, old_version_table.itl)
     {
         for (unsigned i = 0;  i < old_version_table.size();  ++i)
             push_back(old_version_table.element(i));
