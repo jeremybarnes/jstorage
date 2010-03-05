@@ -13,6 +13,7 @@
 #include "jml/arch/exception.h"
 #include "jmvcc/versioned2.h"
 #include "jmvcc/snapshot.h"
+#include <boost/shared_ptr.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
@@ -83,7 +84,12 @@ struct TypedAO
 
     ~TypedAO()
     {
-        VT::free(const_cast<VT *>(vt()));
+        cerr << "destroying TypedAO at " << this << endl;
+
+        VT * d = const_cast<VT *>(vt());
+        for (unsigned i = 0;  i < d->last;  ++i)
+            delete d->element(i).value;
+        VT::free(d);
     }
 
     // Client interface.  Just two methods to get at the current value.
@@ -139,9 +145,26 @@ private:
         return vt()->value_at_epoch(epoch);
     }
 
+    struct ValCleanup {
+        ValCleanup(T * val)
+            : val(val)
+        {
+        }
+
+        T * val;
+
+        void operator () () const
+        {
+            cerr << "valcleanup running for " << val << endl;
+            delete val;
+        }
+
+        enum { useful = true };
+    };
+
     // Internal version_table object allocated for when we have more than one
     // version
-    typedef Version_Table<T *> VT;
+    typedef Version_Table<T *, ValCleanup> VT;
 
     // The single internal version_table member.  Updated atomically.
     mutable VT * version_table;
@@ -318,7 +341,6 @@ public:
 
 struct AOEntry {
     AOEntry()
-        : local(0)
     {
     }
 
@@ -334,21 +356,30 @@ struct AOEntry {
         uint64_t bits;
     };
         
-    AddressableObject * local;
+    boost::shared_ptr<AddressableObject> local;
 };
 
 /** The addressable objects table for a single snapshot (ie no version
     control). */
 struct AOTableVersion : public std::vector<AOEntry> {
+    typedef std::vector<AOEntry> Underlying;
+
     AOTableVersion()
         : object_count_(0)
     {
+        cerr << "default construct AOTableVersion " << this << endl;
+    }
+
+    AOTableVersion(const AOTableVersion & other)
+        : Underlying(other), object_count_(other.object_count_)
+    {
+        cerr << "copied AOTableVersion " << &other << " to "
+             << this << endl;
     }
 
     ~AOTableVersion()
     {
-        for (const_iterator it = begin(), e = end(); it != e;  ++it)
-            delete it->local;
+        cerr << "killed AOTableVersion " << this << endl;
     }
 
     void add(AddressableObject * local)
@@ -546,13 +577,6 @@ struct PersistentObjectStore
 
 private:
     managed_mapped_file backing;
-
-    struct Sandbox_State {
-
-        ~Sandbox_State()
-        {
-        }
-    };
 };
 
 
@@ -585,6 +609,18 @@ BOOST_AUTO_TEST_CASE( test_construct_in_trans1 )
         // Make sure the objects didn't get committed
         BOOST_CHECK_EQUAL(store.object_count(), 0);
     }
+}
+
+BOOST_AUTO_TEST_CASE( test_typedao_destroyed )
+{
+    constructed = destroyed = 0;
+    {
+        TypedAO<Obj> tao(1);
+        BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+
+    }    
+
+    BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
 BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
