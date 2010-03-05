@@ -41,7 +41,6 @@ struct Versioned : public Versioned_Object {
     {
         Entry entry = new_entry(0, val);
         current = entry.value;
-        //valid_from = 0;
     }
 
     ~Versioned()
@@ -252,6 +251,7 @@ public:
             throw Exception("cleaning up with no values");
 
         if (unused_valid_from < history[0].valid_to) {
+            cleanup_entry(history.front());
             history.pop_front();
             return;
         }

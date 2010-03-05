@@ -28,6 +28,8 @@
 #include "jmvcc/transaction.h"
 #include "jmvcc/versioned.h"
 #include "jmvcc/versioned2.h"
+#include "jml/utils/testing/live_counting_obj.h"
+
 
 using namespace ML;
 using namespace JMVCC;
@@ -35,7 +37,7 @@ using namespace std;
 
 using boost::unit_test::test_suite;
 
-template<class Var>
+template<class Var, class Obj>
 void do_versioned_test()
 {
     current_epoch_ = 600;
@@ -58,7 +60,7 @@ void do_versioned_test()
     {
         current_trans = t1.get();
         
-        int & v = var.mutate();
+        Obj & v = var.mutate();
         BOOST_CHECK_EQUAL(v, 0);
         v = 1;
         BOOST_CHECK_EQUAL(v, 1);
@@ -96,7 +98,7 @@ void do_versioned_test()
 
         BOOST_CHECK_EQUAL(var.read(), 1);
 
-        int & v = var.mutate();
+        Obj & v = var.mutate();
         BOOST_CHECK_EQUAL(v, 1);
         v = 2;
         BOOST_CHECK_EQUAL(v, 2);
@@ -224,12 +226,58 @@ void do_versioned_test()
 
 BOOST_AUTO_TEST_CASE( test0 )
 {
-    do_versioned_test<Versioned<int> >();
+    cerr << endl << "================ versioned int" << endl;
+
+    do_versioned_test<Versioned<int>, int>();
 }
 
 BOOST_AUTO_TEST_CASE( test1 )
 {
-    cerr << endl << "================ versioned2" << endl;
+    cerr << endl << "================ versioned2 int" << endl;
 
-    do_versioned_test<Versioned2<int> >();
+    do_versioned_test<Versioned2<int>, int>();
+}
+
+BOOST_AUTO_TEST_CASE( test2 )
+{
+    cerr << endl << "================ versioned obj" << endl;
+
+    constructed = destroyed = 0;
+
+    do_versioned_test<Versioned<Obj>, Obj>();
+
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+}
+
+BOOST_AUTO_TEST_CASE( test3 )
+{
+    cerr << endl << "================ versioned2 obj" << endl;
+
+    constructed = destroyed = 0;
+
+    do_versioned_test<Versioned2<Obj>, Obj>();
+
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+}
+
+BOOST_AUTO_TEST_CASE( test_versioned_frees_everything )
+{
+    cerr << endl << "================ versioned free everything" << endl;
+
+    constructed = destroyed = 0;
+
+
+    {
+        Versioned<Obj> var(0);
+        
+        {
+            Local_Transaction t;
+            
+            Obj & v = var.mutate();
+            v = 1;
+            BOOST_CHECK(t.commit());
+        }
+    }
+    
+    BOOST_CHECK_EQUAL(constructed, destroyed);
 }
