@@ -11,6 +11,7 @@
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"
+#include "jml/arch/demangle.h"
 #include "jmvcc/versioned2.h"
 #include "jmvcc/snapshot.h"
 #include <boost/shared_ptr.hpp>
@@ -22,6 +23,7 @@
 #include <fstream>
 #include <vector>
 #include "jml/utils/testing/live_counting_obj.h"
+#include "jml/utils/hash_map.h"
 
 #include <signal.h>
 
@@ -39,7 +41,35 @@ typedef uint64_t ObjectID;
 
 class PersistentObjectStore;
 
+class AddressableObject;
 
+struct AOInfo {
+    AOInfo(bool live = true)
+        : live(live)
+    {
+    }
+
+    bool live;
+};
+
+typedef hash_map<AddressableObject *, AOInfo> AOS;
+AOS aos;
+
+void print_aos_info()
+{
+    size_t live = 0;
+
+    for (AOS::const_iterator it = aos.begin(), end = aos.end();
+         it != end;  ++it) {
+        cerr << format("%012p %c %s\n", it->first, it->second.live ? 'L' : '.',
+                       (it->second.live ? type_name(*it->first).c_str() : ""));
+        
+        live += it->second.live;
+        
+    }
+
+    cerr << "total " << live << " live objects" << endl;
+}
 
 
 /*****************************************************************************/
@@ -47,6 +77,20 @@ class PersistentObjectStore;
 /*****************************************************************************/
 
 struct AddressableObject : public JMVCC::Versioned_Object {
+
+#if 0
+    AddressableObject()
+    {
+        aos[this].live = true;
+    }
+
+    virtual ~AddressableObject()
+    {
+        cerr << "destroying AO " << type_name(*this) << " at " << this
+             << endl;
+        aos[this].live = false;
+    }
+#endif
 
     /** Return the immutable identity of the object */
     ObjectID id() const;
@@ -79,17 +123,22 @@ struct TypedAO
 
     TypedAO(const T & val = T())
     {
+        cerr << "creating TypedAO " << type_name<T>()
+             << " at " << this << endl;
         version_table = VT::create(new T(val), 1);
+        dump();
+        cerr << endl;
     }
 
     ~TypedAO()
     {
-        cerr << "destroying TypedAO at " << this << endl;
+        cerr << "destroying TypedAO " << type_name<T>() << " at " <<
+            this << endl;
+        dump();
+        cerr << endl;
 
         VT * d = const_cast<VT *>(vt());
-        for (unsigned i = 0;  i < d->last;  ++i)
-            delete d->element(i).value;
-        VT::free(d);
+        VT::free(d, true /* last_copy */);
     }
 
     // Client interface.  Just two methods to get at the current value.
@@ -183,8 +232,10 @@ private:
                                const_cast<VT * &>(old_version_table),
                                new_version_table);
 
-        if (!result) VT::free_now(new_version_table);
-        else VT::free(const_cast<VT *>(old_version_table));
+        if (!result) VT::free_now(new_version_table,
+                                  false /* last_copy */);
+        else VT::free(const_cast<VT *>(old_version_table),
+                      false /* last_copy */);
 
         return result;
     }
@@ -313,8 +364,8 @@ public:
             const typename VT::Entry & entry = d->element(i);
             stream << s << "  " << i << ": valid to "
                    << entry.valid_to;
-            stream << " addr " << &entry.value;
-            stream << " value " << entry.value;
+            stream << " addr " <<  entry.value;
+            stream << " value " << *entry.value;
             stream << endl;
         }
     }
@@ -326,6 +377,8 @@ public:
 
     virtual void destroy_local_value(void * val) const
     {
+        cerr << "destroy_local_value for " << type_name<T>() << " at "
+             << val << endl;
         reinterpret_cast<T *>(val)->~T();
     }
 };
@@ -359,6 +412,13 @@ struct AOEntry {
     boost::shared_ptr<AddressableObject> local;
 };
 
+std::ostream & operator << (std::ostream & stream,
+                            const AOEntry & entry)
+{
+    return stream << entry.local << " ref " << entry.local.use_count() << " "
+                  << type_name(*entry.local) << endl;
+}
+
 /** The addressable objects table for a single snapshot (ie no version
     control). */
 struct AOTableVersion : public std::vector<AOEntry> {
@@ -380,6 +440,9 @@ struct AOTableVersion : public std::vector<AOEntry> {
     ~AOTableVersion()
     {
         cerr << "killed AOTableVersion " << this << endl;
+        for (unsigned i = 0;  i < size();  ++i)
+            cerr << "entry " << i << ": " << operator [] (i) << endl;
+        clear();
     }
 
     void add(AddressableObject * local)
@@ -486,6 +549,11 @@ struct PersistentObjectStore
     {
     }
 
+    ~PersistentObjectStore()
+    {
+        cerr << "destroying PersistentObjecctStore at " << this << endl;
+    }
+
     /*************************************************************************/
     /* ADDRESSABLE OBJECTS                                                   */
     /*************************************************************************/
@@ -579,6 +647,7 @@ private:
     managed_mapped_file backing;
 };
 
+#if 0
 
 BOOST_AUTO_TEST_CASE( test_construct_in_trans1 )
 {
@@ -623,6 +692,8 @@ BOOST_AUTO_TEST_CASE( test_typedao_destroyed )
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
+#endif
+
 BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
 {
     const char * fname = "pvot_backing2";
@@ -638,8 +709,17 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
         {
             Local_Transaction trans;
             // Two persistent versioned objects
-            AORef<Obj> obj1 = store.construct<Obj>(0);
 
+            cerr << endl << endl;
+            cerr << "before creating object" << endl;
+            AORef<Obj> obj1 = store.construct<Obj>(0);
+            cerr << "obj1.ao = " << obj1.ao << endl;
+            cerr << "after creating object" <<endl;
+            cerr << endl << endl;
+
+            print_aos_info();
+
+#if 0
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
             
             AORef<Obj> obj2 = store.construct<Obj>(1);
@@ -652,6 +732,7 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
             BOOST_CHECK_EQUAL(store.object_count(), 2);
             
             // Don't commit the transaction
+#endif
         }
 
         BOOST_CHECK_EQUAL(constructed, destroyed);

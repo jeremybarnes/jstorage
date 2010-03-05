@@ -345,3 +345,37 @@ BOOST_AUTO_TEST_CASE( test_version_table_pointer2 )
     BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
 }
 
+BOOST_AUTO_TEST_CASE( test_version_table_pointer3 )
+{
+    typedef Version_Table<Obj *, DeleteCleanup<Obj>, MyAlloc> VT;
+
+    constructed = destroyed = 0;
+
+    MyAllocData alloc;
+
+    VT * vt = VT::create(new Obj(1), 10, alloc);
+
+    vt->push_back(0, new Obj(1));
+    vt->push_back(1, new Obj(2));
+    vt->pop_back(NEVER_PUBLISHED);
+
+    BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+
+    VT::free(vt);
+    
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
+    BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
+
+
+    BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+
+    VT::free(vt);
+    
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
+    BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
+}
+
