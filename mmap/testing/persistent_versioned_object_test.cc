@@ -129,18 +129,18 @@ struct TypedAO
         dump();
         cerr << endl;
     }
-
+    
     ~TypedAO()
     {
         cerr << "destroying TypedAO " << type_name<T>() << " at " <<
             this << endl;
         dump();
         cerr << endl;
-
-        VT * d = const_cast<VT *>(vt());
-        VT::free(d, true /* last_copy */);
+        
+        VT * d = const_cast< VT * > (vt());
+        VT::free(d, PUBLISHED, EXCLUSIVE);
     }
-
+    
     // Client interface.  Just two methods to get at the current value.
     T & mutate()
     {
@@ -232,10 +232,8 @@ private:
                                const_cast<VT * &>(old_version_table),
                                new_version_table);
 
-        if (!result) VT::free_now(new_version_table,
-                                  false /* last_copy */);
-        else VT::free(const_cast<VT *>(old_version_table),
-                      false /* last_copy */);
+        if (!result) VT::free(new_version_table, NEVER_PUBLISHED, SHARED);
+        else VT::free(const_cast<VT *>(old_version_table), PUBLISHED, SHARED);
 
         return result;
     }
@@ -285,7 +283,7 @@ public:
 
         for (;;) {
             VT * d2 = d->copy(d->size());
-            d2->pop_back();
+            d2->pop_back(NEVER_PUBLISHED, EXCLUSIVE);
             if (set_version_table(d, d2)) return;
         }
     }
