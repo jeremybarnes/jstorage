@@ -301,7 +301,7 @@ private:
         uint32_t last;       // Index of last valid entry
     } itl;
 
-    Entry history[1];  // real ones are allocated after
+    Entry history[0];  // real ones are allocated after
 
     Version_Table(size_t capacity, Allocator allocator = Allocator())
         : itl(capacity, allocator)
