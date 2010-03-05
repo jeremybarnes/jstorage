@@ -500,7 +500,7 @@ struct AOTable : public TypedAO<AOTableVersion> {
 
 template<typename Obj, typename AO = TypedAO<Obj> >
 struct AORef {
-    AORef(AO * ao)
+    AORef(AO * ao = 0)
         : ao(ao), obj(0), rw(false)
     {
     }
@@ -737,6 +737,63 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
         }
     }
 
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+}
+
+BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
+{
+    const char * fname = "pvot_backing2";
+    remove_file_on_destroy destroyer1(fname);
+    unlink(fname);
+
+    constructed = destroyed = 0;
+
+    {
+        // The region for persistent objects, as anonymous mapped memory
+        PersistentObjectStore store(create_only, fname, 65536);
+
+        //ObjectID oid1, oid2;
+        
+        AORef<Obj> obj1, obj2;
+
+        {
+            Local_Transaction trans;
+            // Two persistent versioned objects
+            
+            obj1 = store.construct<Obj>(0);
+            //iod1 = obj1.id();
+
+            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            
+            obj2 = store.construct<Obj>(1);
+            //oid2 = obj2.id();
+
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+            
+            BOOST_CHECK_EQUAL(obj1.read(), 0);
+            BOOST_CHECK_EQUAL(obj2.read(), 1);
+            
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+            
+            BOOST_REQUIRE(trans.commit());
+        }
+
+        BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+        
+        {
+            Local_Transaction trans;
+            
+            //AORef<Obj> obj1 = store.find<Obj>(oid1);
+            //AORef<Obj> obj2 = store.find<Obj>(oid2);
+
+            BOOST_CHECK_EQUAL(obj1.read(), 0);
+            BOOST_CHECK_EQUAL(obj2.read(), 1);
+
+            // Make sure the objects didn't get committed
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+        }
+    }
+    
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 

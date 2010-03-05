@@ -271,3 +271,12 @@ BOOST_AUTO_TEST_CASE(garbage_torture)
     run_garbage_test_mode(2);
     run_garbage_test_mode(3);
 }
+
+BOOST_AUTO_TEST_CASE(test_recursive_cleanup)
+{
+    int v = 0;
+
+    schedule_cleanup(boost::bind(&schedule_cleanup, Set_Var(v, 1)));
+
+    BOOST_CHECK_EQUAL(v, 1);
+}

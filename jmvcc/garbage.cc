@@ -193,8 +193,37 @@ namespace JMVCC {
 struct Critical_Info;
 
 
-typedef ACE_Mutex Critical_Lock;
-Critical_Lock critical_lock;
+struct Critical_Guard {
+    Critical_Guard()
+    {
+        if (lock_depth > 0) {
+            ++lock_depth;
+            return;
+        }
+
+        lock.acquire();
+        lock_depth = 1;
+    }
+
+    ~Critical_Guard()
+    {
+        if (lock_depth > 1) {
+            --lock_depth;
+            return;
+        }
+
+        lock.release();
+        lock_depth = 0;
+    }
+
+    typedef ACE_Mutex Lock;
+    static Lock lock;
+    static __thread unsigned lock_depth;
+};
+
+__thread unsigned Critical_Guard::lock_depth = 0;
+Critical_Guard::Lock Critical_Guard::lock;
+
 
 /// Global pointer to the latest critical info structure.  If this pointer is
 /// null, then it means that there are no critical sections active and so
@@ -341,8 +370,8 @@ void enter_critical()
     t_critical = t_critical_alloc;
     if (t_critical->live)
         throw Exception("entered critical section with live t_critical");
-
-    ACE_Guard<Critical_Lock> guard(critical_lock);
+    
+    Critical_Guard guard;
     t_critical->insert();
     ++t_nesting;
     ++num_in_critical;
@@ -360,7 +389,7 @@ void leave_critical()
 
     // We can't call cleanups with the lock held
     {
-        ACE_Guard<Critical_Lock> guard(critical_lock);
+        Critical_Guard guard;
 
         // Our local list of things to clean up gets transferred to the
         // list of the newest one
@@ -376,7 +405,7 @@ void leave_critical()
     t_critical_alloc->cleanup();
 
     if (debug_mode) {
-        ACE_Guard<Critical_Lock> guard(critical_lock);
+        Critical_Guard guard;
         check_invariants();
     }
 }
@@ -411,7 +440,7 @@ void schedule_cleanup(const Cleanup & cleanup)
         // Slow path: not in a critical section
         // We need to add the value to the newest_ci if it exists, or otherwise
         // just clean it up straight away.
-        ACE_Guard<Critical_Lock> guard(critical_lock); // TO REMOVE
+        Critical_Guard guard;  // TO REMOVE IF POSSIBLE
 
         if (newest_ci) {
             if (debug_mode) atomic_add(num_added_newest, 1);
