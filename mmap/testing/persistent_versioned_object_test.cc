@@ -645,8 +645,6 @@ private:
     managed_mapped_file backing;
 };
 
-#if 0
-
 BOOST_AUTO_TEST_CASE( test_construct_in_trans1 )
 {
     const char * fname = "pvot_backing1";
@@ -689,8 +687,6 @@ BOOST_AUTO_TEST_CASE( test_typedao_destroyed )
 
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
-
-#endif
 
 BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
 {
