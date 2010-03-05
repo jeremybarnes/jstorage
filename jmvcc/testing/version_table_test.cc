@@ -86,7 +86,7 @@ struct MyAllocData {
         return mem;
     }
 
-    void deallocate(void * ptr)
+    void deallocate(void * ptr, size_t bytes)
     {
         if (!info.count(ptr))
             throw Exception("free of unknown memory");
@@ -95,6 +95,12 @@ struct MyAllocData {
 
         if (ainfo.freed)
             throw Exception("double-free");
+
+        if (ainfo.size != bytes) {
+            cerr << "bytes = " << bytes << endl;
+            cerr << "ainfo.size = " << ainfo.size << endl;
+            throw Exception("free of wrong size");
+        }
 
         ainfo.freed = true;
         --objects_outstanding;
@@ -135,9 +141,9 @@ struct MyAlloc {
         return data.allocate(bytes);
     }
     
-    void deallocate(void * ptr)
+    void deallocate(void * ptr, size_t bytes)
     {
-        data.deallocate(ptr);
+        data.deallocate(ptr, bytes);
     }
 };
 
@@ -277,6 +283,62 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory_with_copy3 )
     VT::free(vt2);
     VT::free(vt);
 
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
+    BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
+}
+
+template<typename T>
+struct DeleteCleanup {
+    DeleteCleanup(T * val)
+        : val(val)
+    {
+    }
+    
+    T * val;
+    
+    void operator () () const
+    {
+        cerr << "deletecleanup running for " << val << endl;
+        delete val;
+    }
+    
+    enum { useful = true };
+};
+
+BOOST_AUTO_TEST_CASE( test_version_table_pointer1 )
+{
+    typedef Version_Table<Obj *, DeleteCleanup<Obj>, MyAlloc> VT;
+
+    constructed = destroyed = 0;
+
+    MyAllocData alloc;
+
+    VT * vt = VT::create(10, alloc);
+
+    VT::free(vt);
+    
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
+    BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
+}
+
+BOOST_AUTO_TEST_CASE( test_version_table_pointer2 )
+{
+    typedef Version_Table<Obj *, DeleteCleanup<Obj>, MyAlloc> VT;
+
+    constructed = destroyed = 0;
+
+    MyAllocData alloc;
+
+    VT * vt = VT::create(new Obj(1), 10, alloc);
+
+    BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+
+    VT::free(vt);
+    
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
     BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);

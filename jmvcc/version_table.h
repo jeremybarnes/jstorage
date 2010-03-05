@@ -193,7 +193,8 @@ struct Version_Table {
 
             version_table->~Version_Table();
             version_table->itl.deallocate
-                (reinterpret_cast<char *>(version_table), capacity);
+                (reinterpret_cast<char *>(version_table),
+                 sizeof(Entry) * capacity + sizeof(Version_Table));
         }
 
         Version_Table * version_table;
