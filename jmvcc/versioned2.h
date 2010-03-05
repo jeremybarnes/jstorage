@@ -46,7 +46,7 @@ struct Versioned2 : public Versioned_Object {
 
     ~Versioned2()
     {
-        VT::free(const_cast<VT *>(vt()), true /* last_copy */);
+        VT::free(const_cast<VT *>(vt()), PUBLISHED, EXCLUSIVE);
     }
 
     // Client interface.  Just two methods to get at the current value.
@@ -118,9 +118,9 @@ private:
                                const_cast<VT * &>(old_version_table),
                                new_version_table);
 
-        if (!result) VT::free_now(new_version_table, false /* last_copy */);
+        if (!result) VT::free(new_version_table, NEVER_PUBLISHED, SHARED);
         else VT::free(const_cast<VT *>(old_version_table),
-                      false /* last_copy */);
+                      PUBLISHED, SHARED);
 
         return result;
     }
@@ -170,7 +170,7 @@ public:
 
         for (;;) {
             VT * d2 = d->copy(d->size());
-            d2->pop_back(NEVER_PUBLISHED);
+            d2->pop_back(NEVER_PUBLISHED, EXCLUSIVE);
             if (set_version_table(d, d2)) return;
         }
     }

@@ -324,7 +324,7 @@ struct Version_Table {
         }
         
         if (!found) {
-            free_now(version_table2);
+            free(version_table2, NEVER_PUBLISHED, SHARED);
             return 0;
         }
 
@@ -369,7 +369,7 @@ struct Version_Table {
         }
 
         if (!found) {
-            free_now(d2);
+            free(d2, NEVER_PUBLISHED, SHARED);
             d2 = 0;
         }
 
