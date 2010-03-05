@@ -180,14 +180,22 @@ struct Version_Table {
     }
 
     struct Deleter {
-        Deleter(Version_Table * version_table)
-            : version_table(version_table)
+        Deleter(Version_Table * version_table, bool last_copy)
+            : version_table(version_table), last_copy(last_copy)
         {
         }
 
         void operator () ()
         {
             size_t capacity = version_table->itl.capacity;
+
+            // Clean up the objects
+            if (ValCleanup::useful && last_copy) {
+                for (unsigned i = 0;  i < version_table->itl.last;  ++i) {
+                    ValCleanup vc(version_table->history[i].value);
+                    vc();
+                }
+            }
             
             // TODO: how to avoid destroying the allocator before we use it?
 
@@ -198,16 +206,17 @@ struct Version_Table {
         }
 
         Version_Table * version_table;
+        bool last_copy;
     };
 
-    static void free(Version_Table * version_table)
+    static void free(Version_Table * version_table, bool last_copy = true)
     {
-        schedule_cleanup(Deleter(version_table));
+        schedule_cleanup(Deleter(version_table, last_copy));
     }
 
-    static void free_now(Version_Table * version_table)
+    static void free_now(Version_Table * version_table, bool last_copy = true)
     {
-        Deleter do_it(version_table);
+        Deleter do_it(version_table, last_copy);
         do_it();
     }
 
