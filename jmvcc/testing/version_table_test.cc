@@ -161,7 +161,7 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory1 )
 
     VT * vt = VT::create(10, alloc);
 
-    VT::free(vt);
+    VT::free(vt, NEVER_PUBLISHED, EXCLUSIVE);
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
@@ -178,8 +178,8 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory2 )
 
     VT * vt = VT::create(10, alloc);
     vt->push_back(0, 1);
-    VT::free(vt);
-    
+    VT::free(vt, NEVER_PUBLISHED, EXCLUSIVE);
+        
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
     BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
@@ -196,11 +196,11 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory3 )
     VT * vt = VT::create(10, alloc);
     vt->push_back(0, 1);
     vt->push_back(1, 2);
-    vt->pop_back(NEVER_PUBLISHED);
+    vt->pop_back(NEVER_PUBLISHED, EXCLUSIVE);
 
     BOOST_CHECK_EQUAL(constructed, destroyed + 1);
 
-    VT::free(vt);
+    VT::free(vt, NEVER_PUBLISHED, EXCLUSIVE);
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
@@ -221,12 +221,12 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory_with_copy )
     size_t old_outstanding = constructed - destroyed;
     
     VT * vt2 = VT::create(*vt, 12);
-    VT::free(vt);
+    VT::free(vt, NEVER_PUBLISHED, SHARED);
 
     size_t new_outstanding = constructed - destroyed;
     BOOST_CHECK_EQUAL(old_outstanding, new_outstanding);
 
-    VT::free(vt2);
+    VT::free(vt2, NEVER_PUBLISHED, EXCLUSIVE);
 
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
@@ -247,12 +247,12 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory_with_copy2 )
     size_t old_outstanding = constructed - destroyed;
     
     VT * vt2 = VT::create(*vt, 12);
-    VT::free(vt2);
+    VT::free(vt2, NEVER_PUBLISHED, SHARED);
 
     size_t new_outstanding = constructed - destroyed;
     BOOST_CHECK_EQUAL(old_outstanding, new_outstanding);
 
-    VT::free(vt);
+    VT::free(vt, NEVER_PUBLISHED, EXCLUSIVE);
 
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
@@ -280,32 +280,14 @@ BOOST_AUTO_TEST_CASE( test_version_table_memory_with_copy3 )
     size_t new_outstanding = constructed - destroyed;
     BOOST_CHECK_EQUAL(old_outstanding + 2, new_outstanding);
 
-    VT::free(vt2);
-    VT::free(vt);
+    VT::free(vt2, NEVER_PUBLISHED, EXCLUSIVE);
+    VT::free(vt, NEVER_PUBLISHED, SHARED);
 
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
     BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
     BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
 }
-
-template<typename T>
-struct DeleteCleanup {
-    DeleteCleanup(T * val)
-        : val(val)
-    {
-    }
-    
-    T * val;
-    
-    void operator () () const
-    {
-        cerr << "deletecleanup running for " << val << endl;
-        delete val;
-    }
-    
-    enum { useful = true };
-};
 
 BOOST_AUTO_TEST_CASE( test_version_table_pointer1 )
 {
@@ -317,7 +299,7 @@ BOOST_AUTO_TEST_CASE( test_version_table_pointer1 )
 
     VT * vt = VT::create(10, alloc);
 
-    VT::free(vt);
+    VT::free(vt, NEVER_PUBLISHED, SHARED);
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
@@ -337,7 +319,7 @@ BOOST_AUTO_TEST_CASE( test_version_table_pointer2 )
 
     BOOST_CHECK_EQUAL(constructed, destroyed + 1);
 
-    VT::free(vt);
+    VT::free(vt, NEVER_PUBLISHED, EXCLUSIVE);
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 
@@ -357,11 +339,14 @@ BOOST_AUTO_TEST_CASE( test_version_table_pointer3 )
 
     vt->push_back(0, new Obj(1));
     vt->push_back(1, new Obj(2));
-    vt->pop_back(NEVER_PUBLISHED);
 
-    BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+    BOOST_CHECK_EQUAL(constructed, destroyed + 3);
 
-    VT::free(vt);
+    vt->pop_back(NEVER_PUBLISHED, EXCLUSIVE);
+
+    BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+
+    VT::free(vt, NEVER_PUBLISHED, EXCLUSIVE);
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 

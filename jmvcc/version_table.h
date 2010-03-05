@@ -31,14 +31,46 @@ struct No_Cleanup {
     enum { useful = false };
 };
 
+template<typename T>
+struct DeleteCleanup {
+    DeleteCleanup(T * val)
+        : val(val)
+    {
+    }
+    
+    T * val;
+    
+    void operator () () const
+    {
+        delete val;
+    }
+    
+    enum { useful = true };
+};
+
+
 /** Enum that tells us whether a particular data item has been published or
     not.  If it has been published, then any cleanup must be deferred.
     Otherwise, cleanups can happen straight away.
 */
 enum Published {
-    NEVER_PUBLISHED,
-    PUBLISHED
+    NEVER_PUBLISHED,  ///< Never has been published, cleanup straightaway
+    PUBLISHED         ///< Was published; cleanup later
 };
+
+
+/** Enum that tells us whether we have exclusive or shared ownership of a
+    pointed-to value of data element.  Exclusive means that we can delete
+    the pointed-to thing (ie, we have the only reference to it).  Shared
+    means that there is another reference somewhere, and we shouldn't
+    delete the pointed-to thing.
+*/
+
+enum Sharing {
+    EXCLUSIVE,        ///< We have the exclusive copy; delete the thing
+    SHARED            ///< Something else has a reference as well
+};
+
 
 /*****************************************************************************/
 /* VERSION_TABLE                                                             */
@@ -116,22 +148,25 @@ struct Version_Table {
         }
     };
     
-    void pop_back(Published published = PUBLISHED)
+    void pop_back(Published published, Sharing sharing)
     {
         if (size() < 2)
             throw Exception("popping back last element");
 
-        if (published == PUBLISHED) {
-            RunValueDestructor cleanup(back().value);
+        if (ValCleanup::useful && sharing == EXCLUSIVE) {
+            ValCleanup vc(back().value);
+            if (published == PUBLISHED)
+                schedule_cleanup(vc);
+            else vc();
+        }
+
+        RunValueDestructor cleanup(back().value);
+        
+        if (published == PUBLISHED)
             schedule_cleanup(cleanup);
-        }
-        else {
-            back().value.~T();
-        }
-
+        else cleanup();
+        
         --itl.last;
-        // Need to: make sure that garbage collection runs its destructor
-
     }
 
     void push_back(Epoch valid_to, const T & val)
@@ -179,9 +214,14 @@ struct Version_Table {
         return history[index];
     }
 
+    static size_t bytes_for_capacity(size_t capacity)
+    {
+        return sizeof(Version_Table) + capacity * sizeof(Entry);
+    }
+    
     struct Deleter {
-        Deleter(Version_Table * version_table, bool last_copy)
-            : version_table(version_table), last_copy(last_copy)
+        Deleter(Version_Table * version_table, Sharing sharing)
+            : version_table(version_table), sharing(sharing)
         {
         }
 
@@ -190,7 +230,7 @@ struct Version_Table {
             size_t capacity = version_table->itl.capacity;
 
             // Clean up the objects
-            if (ValCleanup::useful && last_copy) {
+            if (ValCleanup::useful && sharing == EXCLUSIVE) {
                 for (unsigned i = 0;  i < version_table->itl.last;  ++i) {
                     ValCleanup vc(version_table->history[i].value);
                     vc();
@@ -202,29 +242,27 @@ struct Version_Table {
             version_table->~Version_Table();
             version_table->itl.deallocate
                 (reinterpret_cast<char *>(version_table),
-                 sizeof(Entry) * capacity + sizeof(Version_Table));
+                 bytes_for_capacity(capacity));
         }
 
         Version_Table * version_table;
-        bool last_copy;
+        Sharing sharing;
     };
 
-    static void free(Version_Table * version_table, bool last_copy = true)
+    static void free(Version_Table * version_table, Published published,
+                     Sharing sharing)
     {
-        schedule_cleanup(Deleter(version_table, last_copy));
-    }
-
-    static void free_now(Version_Table * version_table, bool last_copy = true)
-    {
-        Deleter do_it(version_table, last_copy);
-        do_it();
+        Deleter deleter(version_table, sharing);
+        if (published == NEVER_PUBLISHED)
+            deleter();
+        else schedule_cleanup(deleter);
     }
 
     static Version_Table * create(size_t capacity,
                                   Allocator allocator = Allocator())
     {
         // TODO: exception safety...
-        void * d = allocator.allocate(sizeof(Version_Table) + capacity * sizeof(Entry));
+        void * d = allocator.allocate(bytes_for_capacity(capacity));
         Version_Table * d2 = new (d) Version_Table(capacity, allocator);
         return d2;
     }
@@ -233,7 +271,7 @@ struct Version_Table {
                                   Allocator allocator = Allocator())
     {
         // TODO: exception safety...
-        void * d = allocator.allocate(sizeof(Version_Table) + capacity * sizeof(Entry));
+        void * d = allocator.allocate(bytes_for_capacity(capacity));
         Version_Table * d2 = new (d) Version_Table(capacity, allocator);
         d2->push_back(Entry(1,  val));
         return d2;
@@ -243,7 +281,7 @@ struct Version_Table {
     {
         // TODO: exception safety...
         Allocator a(old.itl);
-        void * d = a.allocate(sizeof(Version_Table) + capacity * sizeof(Entry));
+        void * d = a.allocate(bytes_for_capacity(capacity));
         Version_Table * d2 = new (d) Version_Table(capacity, old);
         return d2;
     }
