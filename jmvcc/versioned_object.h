@@ -25,6 +25,10 @@ namespace JMVCC {
 
 struct Versioned_Object {
 
+    virtual ~Versioned_Object()
+    {
+    }
+
     // Get the commit ready and check that everything can go ahead, but
     // don't actually perform the commit
     virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * data) = 0;

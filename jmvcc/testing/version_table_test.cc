@@ -367,15 +367,5 @@ BOOST_AUTO_TEST_CASE( test_version_table_pointer3 )
 
     BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
     BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
-
-
-    BOOST_CHECK_EQUAL(constructed, destroyed + 1);
-
-    VT::free(vt);
-    
-    BOOST_CHECK_EQUAL(constructed, destroyed);
-
-    BOOST_CHECK_EQUAL(alloc.objects_outstanding, 0);
-    BOOST_CHECK_EQUAL(alloc.bytes_outstanding, 0);
 }
 
