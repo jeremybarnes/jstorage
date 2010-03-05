@@ -192,6 +192,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file )
 
     int npages = 5;
 
+    Call_Guard guard(boost::bind(unlink, "region1"));
+
     int files_open_before = num_open_files();
 
     // 1.  Create a backed regions
@@ -248,6 +250,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency )
 
     // So we can make sure that all file descriptors were returned
     int files_open_before = num_open_files();
+
+    Call_Guard unlink_guard(boost::bind(unlink, "region1"));
 
     // 1.  Create a backed regions
     Backed_Region region1("region1", npages * page_size);
@@ -344,6 +348,8 @@ BOOST_AUTO_TEST_CASE( test_backing_file_efficiency2 )
     signal(SIGCHLD, SIG_DFL);
 
     int npages = 5;
+
+    Call_Guard guard(boost::bind(unlink, "region1"));
 
     // So we can make sure that all file descriptors were returned
     int files_open_before = num_open_files();
