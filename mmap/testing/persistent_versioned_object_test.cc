@@ -95,20 +95,11 @@ struct TypedAO
     TypedAO(ObjectId id, PersistentObjectStore * owner, const T & val = T())
         : AddressableObject(id, owner)
     {
-        cerr << "creating TypedAO " << type_name<T>()
-             << " at " << this << endl;
         version_table = VT::create(new T(val), 1);
-        dump();
-        cerr << endl;
     }
     
     ~TypedAO()
     {
-        cerr << "destroying TypedAO " << type_name<T>() << " at " <<
-            this << endl;
-        dump();
-        cerr << endl;
-        
         VT * d = const_cast< VT * > (vt());
         VT::free(d, PUBLISHED, EXCLUSIVE);
     }
@@ -176,7 +167,6 @@ private:
 
         void operator () () const
         {
-            cerr << "valcleanup running for " << val << endl;
             delete val;
         }
 
@@ -347,8 +337,6 @@ public:
 
     virtual void destroy_local_value(void * val) const
     {
-        cerr << "destroy_local_value for " << type_name<T>() << " at "
-             << val << endl;
         reinterpret_cast<T *>(val)->~T();
     }
 };
@@ -397,21 +385,15 @@ struct AOTableVersion : public std::vector<AOEntry> {
     AOTableVersion()
         : object_count_(0)
     {
-        cerr << "default construct AOTableVersion " << this << endl;
     }
 
     AOTableVersion(const AOTableVersion & other)
         : Underlying(other), object_count_(other.object_count_)
     {
-        cerr << "copied AOTableVersion " << &other << " to "
-             << this << endl;
     }
 
     ~AOTableVersion()
     {
-        cerr << "killed AOTableVersion " << this << endl;
-        for (unsigned i = 0;  i < size();  ++i)
-            cerr << "entry " << i << ": " << operator [] (i) << endl;
         clear();
     }
 
@@ -541,11 +523,6 @@ struct PersistentObjectStore
                           size_t size)
         : objs(0, this), backing(creation, filename.c_str(), size)
     {
-    }
-
-    ~PersistentObjectStore()
-    {
-        cerr << "destroying PersistentObjecctStore at " << this << endl;
     }
 
     /*************************************************************************/
@@ -700,12 +677,7 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
             Local_Transaction trans;
             // Two persistent versioned objects
 
-            cerr << endl << endl;
-            cerr << "before creating object" << endl;
             AORef<Obj> obj1 = store.construct<Obj>(0);
-            cerr << "obj1.ao = " << obj1.ao << endl;
-            cerr << "after creating object" <<endl;
-            cerr << endl << endl;
 
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
             
