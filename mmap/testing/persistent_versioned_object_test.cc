@@ -513,8 +513,7 @@ struct AORef {
         and reclaims them when they disappear.
 */
 
-struct PersistentObjectStore
-    : public Versioned_Object {
+struct PersistentObjectStore {
 
     // Create a new persistent object store
     template<typename Creation>
@@ -564,56 +563,6 @@ struct PersistentObjectStore
         return objs.object_count();
     }
     
-
-    /*************************************************************************/
-    /* VERSIONED_OBJECT INTERFACE                                            */
-    /*************************************************************************/
-
-    // Get the commit ready and check that everything can go ahead, but
-    // don't actually perform the commit
-    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * data)
-    {
-        // 1.  Allocate persistent memory for the new value
-        
-        // 2.  Allocate heap memory for the new internal data structure
-
-        // 3.  Success
-        throw Exception("not implemented");
-    }
-
-    // Confirm a setup commit, making it permanent
-    virtual void commit(Epoch new_epoch) throw ()
-    {
-        // 1.  Serialize the new value in the new memory
-
-        // 2.  Switch the pointer to point to the new memory
-
-        // 3.  Arrange for the old memory to be freed once everything has made
-        //     a critical section transition
-        throw Exception("not implemented");
-    }
-
-    // Roll back a setup commit
-    virtual void rollback(Epoch new_epoch, void * data) throw ()
-    {
-        // 1.  Deallocate the memory from the owner in the mmap range
-        throw Exception("not implemented");
-    }
-
-    // Clean up an unused version
-    virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch)
-    {
-        throw Exception("not implemented");
-    }
-    
-    // Rename an epoch to a different number.  Returns the valid_from value
-    // of the next epoch in the set.
-    virtual Epoch rename_epoch(Epoch old_valid_from,
-                               Epoch new_valid_from) throw ()
-    {
-        throw Exception("not implemented");
-    }
-
 private:
     managed_mapped_file backing;
 };
