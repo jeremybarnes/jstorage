@@ -725,7 +725,6 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
-#if 0
 BOOST_AUTO_TEST_CASE( test_persistence )
 {
     const char * fname = "pvot_backing4";
@@ -788,7 +787,6 @@ BOOST_AUTO_TEST_CASE( test_persistence )
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
-#endif
 
 #if 0
 {
