@@ -44,7 +44,7 @@ typedef uint64_t ObjectId;
 static const ObjectId NO_OBJECT_ID = (ObjectId)-1;
 
 class PersistentObjectStore;
-
+class AOTable;
 
 /*****************************************************************************/
 /* ADDRESSABLE_OBJECT                                                        */
@@ -52,7 +52,7 @@ class PersistentObjectStore;
 
 struct AddressableObject : public JMVCC::Versioned_Object {
 
-    AddressableObject(ObjectId id, PersistentObjectStore * owner)
+    AddressableObject(ObjectId id, AOTable * owner)
         : id_(id), owner_(owner)
     {
     }
@@ -64,7 +64,7 @@ struct AddressableObject : public JMVCC::Versioned_Object {
     }
 
     /** Who owns this object */
-    PersistentObjectStore * owner() const
+    AOTable * owner() const
     {
         return owner_;
     }
@@ -74,7 +74,7 @@ struct AddressableObject : public JMVCC::Versioned_Object {
 
 private:
     ObjectId id_;  ///< Identity in the memory mapped region
-    PersistentObjectStore * owner_;  ///< Responsible for dealing with it
+    AOTable * owner_;  ///< Responsible for dealing with it
 
     friend class AOTableVersion;
 };
@@ -94,7 +94,7 @@ template<typename T>
 struct TypedAO
     : public AddressableObject {
 
-    TypedAO(ObjectId id, PersistentObjectStore * owner, const T & val = T())
+    TypedAO(ObjectId id, AOTable * owner, const T & val = T())
         : AddressableObject(id, owner)
     {
         version_table = VT::create(new T(val), 1);
@@ -425,6 +425,23 @@ struct AOTableVersion : public std::vector<AOEntry> {
     {
         return object_count_;
     }
+
+    void * serialize(PersistentObjectStore * store) const
+    {
+        size_t mem_needed = size() * 8;  // just a pointer each
+        uint64_t * mem
+            = (uint64_t *)store->allocate_aligned(mem_needed, 8);
+        for (unsigned i = 0;  i < size();  ++i)
+            mem[i] = operator [] (i).offset;
+        return mem;
+    }
+
+    void reconstitute(PersistentObjectStore * store,
+                      AOTable * owner,
+                      const char * data)
+    {
+    }
+
 };
 
 inline std::ostream &
@@ -436,7 +453,7 @@ operator << (std::ostream & stream, const AOTableVersion & ver)
 struct AOTable : public TypedAO<AOTableVersion> {
     typedef TypedAO<AOTableVersion> Underlying;
 
-    AOTable(ObjectId id, PersistentObjectStore * owner)
+    AOTable(ObjectId id, AOTable * owner)
         : Underlying(id, owner)
     {
     }
@@ -539,26 +556,23 @@ struct AORef {
         and reclaims them when they disappear.
 */
 
-struct PersistentObjectStore : public AOTable {
+struct PersistentObjectStore : public AOTable, public managed_mapped_file {
 
     // Create a new persistent object store
     PersistentObjectStore(const create_only_t & creation,
                           const std::string & filename,
                           size_t size)
         : AOTable(0, this),
-          backing(creation, filename.c_str(), size)
+          managed_mapped_file(creation, filename.c_str(), size)
     {
     }
 
     PersistentObjectStore(const open_only_t & creation,
                           const std::string & filename)
         : AOTable(0, this),
-          backing(creation, filename.c_str())
+          managed_mapped_file(creation, filename.c_str())
     {
     }
-
-private:
-    managed_mapped_file backing;
 };
 
 
