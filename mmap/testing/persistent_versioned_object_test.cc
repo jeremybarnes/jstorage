@@ -17,6 +17,8 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
+#include <boost/utility/enable_if.hpp>
+#include <boost/type_traits/is_base_of.hpp>
 #include <iostream>
 #include "jml/utils/guard.h"
 #include <boost/bind.hpp>
@@ -348,6 +350,19 @@ public:
 
 /** A table of addressable objects.  Performs the mapping between an object
     ID and an offset in the file.  This is itself a versioned object.
+
+    Set of all addressable objects that are currently instantiated into
+    memory.
+    
+    An addressable object will be instantiated in memory if it has more
+    than one version in the active snapshots.
+    
+    A new object that is created in a snapshot (but is not yet committed)
+    will be instantiated in the snapshot's local change list.
+    
+    There is no tracking of deletions.  An ID of a deleted object is
+    invalid as soon as the last snapshot that it was alive in has
+    disappeared.
 */
 
 struct AOEntry {
@@ -434,12 +449,23 @@ struct AOTable : public TypedAO<AOTableVersion> {
         return result.release();
     }
     
+    // Construct a given object type
     template<typename AO, typename Arg1>
-    AO * construct(const Arg1 & arg1)
+    typename boost::enable_if<boost::is_base_of<AddressableObject, AO>, AO *>::type
+    construct(const Arg1 & arg1)
     {
         auto_ptr<AO> result(new AO(NO_OBJECT_ID, owner(), arg1));
         mutate().add(result.get());
         return result.release();
+    }
+    
+    // Construct a typed AO
+    template<typename T, typename Arg1>
+    typename boost::disable_if<boost::is_base_of<AddressableObject, T>,
+                               TypedAO<T> *>::type
+    construct(const Arg1 & arg1)
+    {
+        return construct<TypedAO<T> >(arg1);
     }
     
     AddressableObject *
@@ -513,59 +539,26 @@ struct AORef {
         and reclaims them when they disappear.
 */
 
-struct PersistentObjectStore {
+struct PersistentObjectStore : public AOTable {
 
     // Create a new persistent object store
     template<typename Creation>
     PersistentObjectStore(const Creation & creation,
                           const std::string & filename,
                           size_t size)
-        : objs(0, this), backing(creation, filename.c_str(), size)
+        : AOTable(0, this),
+          backing(creation, filename.c_str(), size)
     {
     }
 
-    /*************************************************************************/
-    /* ADDRESSABLE OBJECTS                                                   */
-    /*************************************************************************/
-
-    /** Set of all addressable objects that are currently instantiated into
-        memory.
-
-        An addressable object will be instantiated in memory if it has more
-        than one version in the active snapshots.
-
-        A new object that is created in a snapshot (but is not yet committed)
-        will be instantiated in the snapshot's local change list.
-
-        There is no tracking of deletions.  An ID of a deleted object is
-        invalid as soon as the last snapshot that it was alive in has
-        disappeared.
-    */
-
-    AOTable objs;
-
-    template<typename Underlying>
-    AORef<Underlying>
-    construct()
-    {
-        return objs.construct<TypedAO<Underlying> >();
-    }
-
-    template<typename Underlying, typename Arg1>
-    AORef<Underlying>
-    construct(const Arg1 & arg1)
-    {
-        return objs.construct<TypedAO<Underlying> >(arg1);
-    }
-    
-    size_t object_count() const
-    {
-        return objs.object_count();
-    }
-    
 private:
     managed_mapped_file backing;
 };
+
+
+
+
+/*****************************************************************************/
 
 BOOST_AUTO_TEST_CASE( test_construct_in_trans1 )
 {
@@ -718,8 +711,8 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
         {
             Local_Transaction trans;
             
-            AORef<Obj> obj1 = store.objs.lookup(oid1);
-            AORef<Obj> obj2 = store.objs.lookup(oid2);
+            AORef<Obj> obj1 = store.lookup(oid1);
+            AORef<Obj> obj2 = store.lookup(oid2);
 
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
@@ -782,8 +775,8 @@ BOOST_AUTO_TEST_CASE( test_persistence )
         {
             Local_Transaction trans;
             
-            AORef<Obj> obj1 = store.objs.lookup<Obj>(oid1);
-            AORef<Obj> obj2 = store.objs.lookup<Obj>(oid2);
+            AORef<Obj> obj1 = store.lookup<Obj>(oid1);
+            AORef<Obj> obj2 = store.lookup<Obj>(oid2);
 
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
