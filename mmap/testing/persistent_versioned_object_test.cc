@@ -542,12 +542,18 @@ struct AORef {
 struct PersistentObjectStore : public AOTable {
 
     // Create a new persistent object store
-    template<typename Creation>
-    PersistentObjectStore(const Creation & creation,
+    PersistentObjectStore(const create_only_t & creation,
                           const std::string & filename,
                           size_t size)
         : AOTable(0, this),
           backing(creation, filename.c_str(), size)
+    {
+    }
+
+    PersistentObjectStore(const open_only_t & creation,
+                          const std::string & filename)
+        : AOTable(0, this),
+          backing(creation, filename.c_str())
     {
     }
 
@@ -733,12 +739,12 @@ BOOST_AUTO_TEST_CASE( test_persistence )
 
     constructed = destroyed = 0;
 
+    ObjectId oid1, oid2;
+
     {
         // The region for persistent objects, as anonymous mapped memory
         PersistentObjectStore store(create_only, fname, 65536);
 
-        //ObjectId oid1, oid2;
-        
         AORef<Obj> obj1, obj2;
 
         {
@@ -746,15 +752,20 @@ BOOST_AUTO_TEST_CASE( test_persistence )
             // Two persistent versioned objects
             
             obj1 = store.construct<Obj>(0);
-            //iod1 = obj1.id();
 
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+
+            oid1 = obj1.id();
+            BOOST_CHECK_EQUAL(oid1, 0);
             
             obj2 = store.construct<Obj>(1);
-            //oid2 = obj2.id();
 
             BOOST_CHECK_EQUAL(constructed, destroyed + 2);
             
+            oid2 = obj2.id();
+
+            BOOST_CHECK_EQUAL(oid2, 1);
+
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
             
@@ -762,20 +773,20 @@ BOOST_AUTO_TEST_CASE( test_persistence )
             
             BOOST_REQUIRE(trans.commit());
         }
-
+        
         BOOST_CHECK_EQUAL(constructed, destroyed + 2);
     }
-
+    
     BOOST_CHECK_EQUAL(constructed, destroyed);
     {
         // The region for persistent objects, as anonymous mapped memory
-        PersistentObjectStore store(open_only, fname, 65536);
+        PersistentObjectStore store(open_only, fname);
 
         {
             Local_Transaction trans;
             
-            AORef<Obj> obj1 = store.lookup<Obj>(oid1);
-            AORef<Obj> obj2 = store.lookup<Obj>(oid2);
+            AORef<Obj> obj1 = store.lookup(oid1);
+            AORef<Obj> obj2 = store.lookup(oid2);
 
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
