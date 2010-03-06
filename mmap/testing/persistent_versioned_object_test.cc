@@ -37,39 +37,11 @@ using namespace JMVCC;
 using namespace std;
 
 
-typedef uint64_t ObjectID;
+typedef uint64_t ObjectId;
+
+static const ObjectId NO_OBJECT_ID = (ObjectId)-1;
 
 class PersistentObjectStore;
-
-class AddressableObject;
-
-struct AOInfo {
-    AOInfo(bool live = true)
-        : live(live)
-    {
-    }
-
-    bool live;
-};
-
-typedef hash_map<AddressableObject *, AOInfo> AOS;
-AOS aos;
-
-void print_aos_info()
-{
-    size_t live = 0;
-
-    for (AOS::const_iterator it = aos.begin(), end = aos.end();
-         it != end;  ++it) {
-        cerr << format("%012p %c %s\n", it->first, it->second.live ? 'L' : '.',
-                       (it->second.live ? type_name(*it->first).c_str() : ""));
-        
-        live += it->second.live;
-        
-    }
-
-    cerr << "total " << live << " live objects" << endl;
-}
 
 
 /*****************************************************************************/
@@ -78,32 +50,31 @@ void print_aos_info()
 
 struct AddressableObject : public JMVCC::Versioned_Object {
 
-#if 0
-    AddressableObject()
+    AddressableObject(ObjectId id, PersistentObjectStore * owner)
+        : id_(id), owner_(owner)
     {
-        aos[this].live = true;
     }
-
-    virtual ~AddressableObject()
-    {
-        cerr << "destroying AO " << type_name(*this) << " at " << this
-             << endl;
-        aos[this].live = false;
-    }
-#endif
 
     /** Return the immutable identity of the object */
-    ObjectID id() const;
+    ObjectId id() const
+    {
+        return id_;
+    }
 
     /** Who owns this object */
-    PersistentObjectStore * owner() const;
+    PersistentObjectStore * owner() const
+    {
+        return owner_;
+    }
 
     /** How many versions of the object are there? */
     virtual size_t num_versions() const = 0;
 
 private:
-    ObjectID id_;  ///< Identity in the memory mapped region
+    ObjectId id_;  ///< Identity in the memory mapped region
     PersistentObjectStore * owner_;  ///< Responsible for dealing with it
+
+    friend class AOTableVersion;
 };
 
 
@@ -121,7 +92,8 @@ template<typename T>
 struct TypedAO
     : public AddressableObject {
 
-    TypedAO(const T & val = T())
+    TypedAO(ObjectId id, PersistentObjectStore * owner, const T & val = T())
+        : AddressableObject(id, owner)
     {
         cerr << "creating TypedAO " << type_name<T>()
              << " at " << this << endl;
@@ -445,6 +417,7 @@ struct AOTableVersion : public std::vector<AOEntry> {
 
     void add(AddressableObject * local)
     {
+        local->id_ = size();
         push_back(AOEntry(local));
         ++object_count_;
     }
@@ -464,10 +437,17 @@ operator << (std::ostream & stream, const AOTableVersion & ver)
 }
 
 struct AOTable : public TypedAO<AOTableVersion> {
+    typedef TypedAO<AOTableVersion> Underlying;
+
+    AOTable(ObjectId id, PersistentObjectStore * owner)
+        : Underlying(id, owner)
+    {
+    }
+
     template<typename AO>
     AO * construct()
     {
-        auto_ptr<AO> result(new AO());
+        auto_ptr<AO> result(new AO(NO_OBJECT_ID, owner()));
         mutate().add(result.get());
         return result.release();
     }
@@ -475,9 +455,18 @@ struct AOTable : public TypedAO<AOTableVersion> {
     template<typename AO, typename Arg1>
     AO * construct(const Arg1 & arg1)
     {
-        auto_ptr<AO> result(new AO(arg1));
+        auto_ptr<AO> result(new AO(NO_OBJECT_ID, owner(), arg1));
         mutate().add(result.get());
         return result.release();
+    }
+    
+    AddressableObject *
+    lookup(ObjectId obj) const
+    {
+        if (obj >= read().size())
+            throw Exception("unknown object");
+
+        return read().operator [] (obj).local.get();
     }
 
     size_t object_count() const
@@ -505,9 +494,16 @@ struct AORef {
     {
     }
 
+    AORef(AddressableObject * ao)
+        : ao(dynamic_cast<AO *>(ao)), obj(0), rw(false)
+    {
+    }
+
     AO * ao;
     Obj * obj;
     bool rw;
+
+    ObjectId id() const { return ao->id(); }
 
     operator const Obj () const { return ao->read(); }
 
@@ -543,7 +539,7 @@ struct PersistentObjectStore
     PersistentObjectStore(const Creation & creation,
                           const std::string & filename,
                           size_t size)
-        : backing(creation, filename.c_str(), size)
+        : objs(0, this), backing(creation, filename.c_str(), size)
     {
     }
 
@@ -680,7 +676,7 @@ BOOST_AUTO_TEST_CASE( test_typedao_destroyed )
 {
     constructed = destroyed = 0;
     {
-        TypedAO<Obj> tao(1);
+        TypedAO<Obj> tao(0, 0, 1);
         BOOST_CHECK_EQUAL(constructed, destroyed + 1);
 
     }    
@@ -710,8 +706,6 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
             cerr << "obj1.ao = " << obj1.ao << endl;
             cerr << "after creating object" <<endl;
             cerr << endl << endl;
-
-            print_aos_info();
 
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
             
@@ -752,7 +746,7 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
         // The region for persistent objects, as anonymous mapped memory
         PersistentObjectStore store(create_only, fname, 65536);
 
-        //ObjectID oid1, oid2;
+        ObjectId oid1, oid2;
         
         AORef<Obj> obj1, obj2;
 
@@ -761,15 +755,20 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
             // Two persistent versioned objects
             
             obj1 = store.construct<Obj>(0);
-            //iod1 = obj1.id();
 
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+
+            oid1 = obj1.id();
+            BOOST_CHECK_EQUAL(oid1, 0);
             
             obj2 = store.construct<Obj>(1);
-            //oid2 = obj2.id();
 
             BOOST_CHECK_EQUAL(constructed, destroyed + 2);
             
+            oid2 = obj2.id();
+
+            BOOST_CHECK_EQUAL(oid2, 1);
+
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
             
@@ -792,11 +791,27 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
             // Make sure the objects didn't get committed
             BOOST_CHECK_EQUAL(store.object_count(), 2);
         }
+
+        BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+        
+        {
+            Local_Transaction trans;
+            
+            AORef<Obj> obj1 = store.objs.lookup(oid1);
+            AORef<Obj> obj2 = store.objs.lookup(oid2);
+
+            BOOST_CHECK_EQUAL(obj1.read(), 0);
+            BOOST_CHECK_EQUAL(obj2.read(), 1);
+
+            // Make sure the objects didn't get committed
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+        }
     }
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
+#if 0
 BOOST_AUTO_TEST_CASE( test_persistence )
 {
     const char * fname = "pvot_backing4";
@@ -809,7 +824,7 @@ BOOST_AUTO_TEST_CASE( test_persistence )
         // The region for persistent objects, as anonymous mapped memory
         PersistentObjectStore store(create_only, fname, 65536);
 
-        //ObjectID oid1, oid2;
+        //ObjectId oid1, oid2;
         
         AORef<Obj> obj1, obj2;
 
@@ -846,8 +861,8 @@ BOOST_AUTO_TEST_CASE( test_persistence )
         {
             Local_Transaction trans;
             
-            AORef<Obj> obj1 = store.find<Obj>(oid1);
-            AORef<Obj> obj2 = store.find<Obj>(oid2);
+            AORef<Obj> obj1 = store.objs.lookup<Obj>(oid1);
+            AORef<Obj> obj2 = store.objs.lookup<Obj>(oid2);
 
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
@@ -859,6 +874,7 @@ BOOST_AUTO_TEST_CASE( test_persistence )
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
+#endif
 
 #if 0
 {
