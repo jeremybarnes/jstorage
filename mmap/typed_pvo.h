@@ -138,27 +138,156 @@ private:
 public:
     // Implement object interface
 
+    // Is it possible to perform the commit?
+    bool check_commit_possible(const VT * d, Epoch old_epoch,
+                               Epoch new_epoch) const
+    {
+        Epoch valid_from = 1;
+        if (d->size() > 1)
+            valid_from = d->element(d->size() - 2).valid_to;
+        
+        if (valid_from > old_epoch)
+            return false;  // something updated before us
+        return true;
+    }
+
+    virtual bool check(Epoch old_epoch, Epoch new_epoch,
+                       void * new_value) const
+    {
+        return check_commit_possible(vt(), old_epoch, new_epoch);
+    }
+
     virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
     {
+        // Perform the commit assuming that it's going to go ahead.  We
+        // have to:
+        // 1.  Commit the new value to permanent storage;
+        // 2.  Set up the new table to point to it;
+        // 3.  Swap the new table in place, pointing to both the OLD and the
+        //
+        // Before:
+        //                          current epoch
+        //                          |       new epoch
+        //                          |       |
+        //                          v       v             PVO Manager
+        // +-------+--------+-------+-------+         +------+------+
+        // |  v1   |   v2   |   v3  |  v4   |<--------| Mem  | Disk |
+        // +-------+--------+-------+-------+         +------+------+
+        //     |        |       |       |                        |
+        //     v        v       v       v                        |
+        // +------+ +------+ +-----+ +-----+                     |
+        // |      | |      | |     | |     |                     |
+        // +------+ +------+ +-----+ +-----+                     |
+        // Memory^                                               |
+        //                           +-----+                     |
+        // Disk>                     |     |<--------------------+
+        //                           +-----+   
+        //
+        // After setup:
+        //                          current epoch
+        //                          |       new epoch
+        //                          |       |
+        //                          v       v             PVO Manager
+        // +-------+--------+-------+-------+------+  +------+------+
+        // |  v1   |   v2   |   v3  |  v4   |  v5  |<-| Mem  | Disk |
+        // +-------+--------+-------+-------+------+  +------+------+
+        //     |        |       |       |       |                |
+        //     v        v       v       v       v                |
+        // +------+ +------+ +-----+ +-----+ +-----+             |
+        // |      | |      | |     | |     | |     |             |
+        // +------+ +------+ +-----+ +-----+ +-----+             |
+        // Memory^                                               |
+        //                           +-----+ +-----+             |
+        // Disk>                     |     | |     |             |
+        //                           +-----+ +-----+             |
+        //                              ^                        |
+        //                              |                        |
+        //                              +------------------------+
+        //                             
+        //
+        // After commit:
+        //                          current epoch
+        //                          |       new epoch
+        //                          |       |
+        //                          v       v             PVO Manager
+        // +-------+--------+-------+-------+------+  +------+------+
+        // |  v1   |   v2   |   v3  |  v4   |  v5  |<-| Mem  | Disk |
+        // +-------+--------+-------+-------+------+  +------+------+
+        //     |        |       |       |       |                |
+        //     v        v       v       v       v                |
+        // +------+ +------+ +-----+ +-----+ +-----+             |
+        // |      | |      | |     | |     | |     |             |
+        // +------+ +------+ +-----+ +-----+ +-----+             |
+        // Memory^                                               |
+        //                           +.....+ +-----+             |
+        // Disk>                     :freed: |     |             |
+        //                           +.....+ +-----+             |
+        //                                      ^                |
+        //                                      |                |
+        //                                      +----------------+
+        //
+        //
+        // After rollback:
+        //
+        //                          current epoch
+        //                          |       new epoch
+        //                          |       |
+        //                          v       v             PVO Manager
+        // +-------+--------+-------+-------+         +------+------+
+        // |  v1   |   v2   |   v3  |  v4   | <-------| Mem  | Disk |
+        // +-------+--------+-------+-------+         +------+------+
+        //     |        |       |       |                        |
+        //     v        v       v       v                        |
+        // +------+ +------+ +-----+ +-----+ +.....+             |
+        // |      | |      | |     | |     | :freed:             |
+        // +------+ +------+ +-----+ +-----+ +.....+             |
+        // Memory^                                               |
+        //                           +-----+ +.....+             |
+        // Disk>                     |     | :freed:             |
+        //                           +-----+ +.....+             |
+        //                              ^                        |
+        //                              |                        |
+        //                              +------------------------+
+        //
+        //                          current epoch
+        //                          |       new epoch
+        //                          |       |
+        //                          v       v
+        // +-------+--------+-------+-------+
+        // |  v1   |   v2   |   v3  |  v4   |
+        // +-------+--------+-------+-------+         
+        //     |        |       |       |        
+        //     v        v       v       |         
+        // +------+ +------+ +------+   |        
+        // |      | |      | |      |   |              In Memory
+        // +------+ +------+ +------+   |        
+        //                              v        
+        //                           +-----+            
+        //                           |     |  freed     On Disk
+        //                           +-----+            
+        
+
+        std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
+
+        size_t offset = serialize(store(), nv);
+
         for (;;) {
             const VT * d = vt();
 
             if (new_epoch != get_current_epoch() + 1)
                 throw Exception("epochs out of order");
             
-            Epoch valid_from = 1;
-            if (d->size() > 1)
-                valid_from = d->element(d->size() - 2).valid_to;
-            
-            if (valid_from > old_epoch)
-                return false;  // something updated before us
-            
+            if (!check_commit_possible(d, old_epoch, new_epoch))
+                return false;
+
             VT * new_version_table = d->copy(d->size() + 1);
             new_version_table->back().valid_to = new_epoch;
-            new_version_table->push_back(1 /* valid_to */,
-                                         new T(*reinterpret_cast<T *>(new_value)));
+            new_version_table->push_back(1 /* valid_to */, nv.get());
             
-            if (set_version_table(d, new_version_table)) return true;
+            if (set_version_table(d, new_version_table)) {
+                nv.release();  // no need to delete it now
+                return true;
+            }
         }
     }
 
@@ -176,6 +305,12 @@ public:
 
     virtual void rollback(Epoch new_epoch, void * local_version_table) throw ()
     {
+        // The commit didn't happen.  We need to:
+        // 1.  Free up the memory associated with the object that we just
+        //     serialized.  Since it was published, something might be
+        //     accessing it.
+        // 2.  Swap back an old version of the table into place
+
         const VT * d = vt();
 
         for (;;) {
