@@ -226,6 +226,9 @@ public:
         //                                      |                |
         //                                      +----------------+
         //
+        // Note that the free is deferred until all critical sections have
+        // finished, as something could be accessing the data.
+        //
         //
         // After rollback:
         //
@@ -249,23 +252,7 @@ public:
         //                              |                        |
         //                              +------------------------+
         //
-        //                          current epoch
-        //                          |       new epoch
-        //                          |       |
-        //                          v       v
-        // +-------+--------+-------+-------+
-        // |  v1   |   v2   |   v3  |  v4   |
-        // +-------+--------+-------+-------+         
-        //     |        |       |       |        
-        //     v        v       v       |         
-        // +------+ +------+ +------+   |        
-        // |      | |      | |      |   |              In Memory
-        // +------+ +------+ +------+   |        
-        //                              v        
-        //                           +-----+            
-        //                           |     |  freed     On Disk
-        //                           +-----+            
-        
+        // Again the free is deferred
 
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
 
