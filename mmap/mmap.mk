@@ -3,6 +3,9 @@
 # Copyright (c) 2010 Recoset.  All rights reserved.
 
 MMAP_SOURCES := \
+	pvo_manager.cc \
+	pvo_store.cc \
+	pvo.cc
 
 MMAP_LINK :=
 
