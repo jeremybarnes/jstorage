@@ -191,6 +191,16 @@ private:
 public:
     // Implement object interface
 
+    virtual bool check(Epoch old_epoch, Epoch new_epoch,
+                       void * new_value) const
+    {
+        ACE_Guard<Mutex> guard(lock);
+        
+        if (valid_from() > old_epoch)
+            return false;  // something updated before us
+        return true;
+    }
+
     virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * data)
     {
         ACE_Guard<Mutex> guard(lock);

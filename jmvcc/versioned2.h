@@ -127,6 +127,19 @@ private:
         
 public:
     // Implement object interface
+    virtual bool check(Epoch old_epoch, Epoch new_epoch,
+                       void * new_value) const
+    {
+        const VT * d = vt();
+        
+        Epoch valid_from = 1;
+        if (d->size() > 1)
+            valid_from = d->element(d->size() - 2).valid_to;
+            
+        if (valid_from > old_epoch)
+            return false;  // something updated before us
+        return true;
+    }
 
     virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
     {

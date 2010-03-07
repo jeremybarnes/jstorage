@@ -43,18 +43,37 @@ Epoch
 Sandbox::
 commit(Epoch old_epoch)
 {
-    ACE_Guard<ACE_Mutex> guard(commit_lock);
-
     Epoch new_epoch = get_current_epoch() + 1;
 
     bool result = true;
 
     Local_Values::iterator
-        it = local_values.begin(),
-        end = local_values.end();
+        it, end = local_values.end();
+
+    // Check everything, before the lock is obtained
+    for (it = local_values.begin(); result && it != end;  ++it)
+        result = it->first->check(old_epoch, new_epoch, it->second.val);
+
+    if (!result) {
+        clear();
+        return 0;
+    }
+
+    ACE_Guard<ACE_Mutex> guard(commit_lock);
+
+    new_epoch = get_current_epoch() + 1;
 
     // Commit everything
-    for (; result && it != end;  ++it)
+    for (it = local_values.begin(); result && it != end;  ++it)
+        result = it->first->check(old_epoch, new_epoch, it->second.val);
+
+    if (!result) {
+        clear();
+        return 0;
+    }
+
+    // Commit everything
+    for (it = local_values.begin(); result && it != end;  ++it)
         result = it->first->setup(old_epoch, new_epoch, it->second.val);
 
     if (result) {

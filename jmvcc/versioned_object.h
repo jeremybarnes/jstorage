@@ -29,6 +29,13 @@ struct Versioned_Object {
     {
     }
 
+    // Check that the given commit is possible to perform.  Should perform the
+    // check as quickly as possible; it doesn't matter if it returns a false
+    // positive (but false negatives are verbotim).  Used to abort a commit
+    // early if there is no possibility of it working.
+    // Should not modify anything.
+    virtual bool check(Epoch old_epoch, Epoch new_epoch, void * data) const = 0;
+
     // Get the commit ready and check that everything can go ahead, but
     // don't actually perform the commit
     virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * data) = 0;
