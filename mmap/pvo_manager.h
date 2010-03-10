@@ -83,6 +83,9 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
 std::ostream &
 operator << (std::ostream & stream, const PVOManagerVersion & ver);
 
+std::pair<size_t, size_t>
+serialize(PVOStore & store, const PVOManagerVersion & version);
+
 
 /*****************************************************************************/
 /* PVO_MANAGER                                                               */

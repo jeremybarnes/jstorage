@@ -9,6 +9,7 @@
 #define __jmvcc__pvo_store_h__
 
 #include "pvo_manager.h"
+#include "memory_manager.h"
 #include <boost/scoped_ptr.hpp>
 #include <boost/interprocess/creation_tags.hpp>
 
@@ -30,7 +31,7 @@ namespace JMVCC {
     3.  Keeps track of the allocated and free memory in the region
 */
 
-struct PVOStore : public PVOManager, boost::noncopyable {
+struct PVOStore : public PVOManager, public MemoryManager, boost::noncopyable {
     
 public:
     // Create a new persistent object store
@@ -44,7 +45,11 @@ public:
 
     virtual ~PVOStore();
 
+    virtual size_t to_offset(void * pointer) const;
+
     virtual void * allocate_aligned(size_t nbytes, size_t alignment);
+
+    virtual void deallocate(size_t offset, size_t bytes);
 
 private:
     class Itl;

@@ -10,6 +10,8 @@
 
 #include "pvo.h"
 #include "jmvcc/version_table.h"
+#include "serialization.h"
+#include "jml/utils/guard.h"
 
 namespace JMVCC {
 
@@ -28,7 +30,7 @@ struct TypedPVO
     : public PVO {
 
     TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
-        : PVO(id, owner)
+        : PVO(id, owner), new_data(0)
     {
         version_table = VT::create(new T(val), 1);
     }
@@ -115,6 +117,9 @@ private:
     // The single internal version_table member.  Updated atomically.
     mutable VT * version_table;
 
+    // The location of the new data member when making a commit
+    size_t new_data;
+
     const VT * vt() const
     {
         return reinterpret_cast<const VT *>(version_table);
@@ -198,7 +203,7 @@ public:
         // +------+ +------+ +-----+ +-----+ +-----+             |
         // Memory^                                               |
         //                           +-----+ +-----+             |
-        // Disk>                     |     | |     |             |
+        // Disk>                     |     | |     |<- new_data  |
         //                           +-----+ +-----+             |
         //                              ^                        |
         //                              |                        |
@@ -256,7 +261,16 @@ public:
 
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
 
-        size_t offset = serialize(store(), nv);
+        if (new_data)
+            throw Exception("setup() with new_data already set");
+
+        size_t data_size;
+        std::pair<size_t, size_t> p = serialize(*store(), *nv);
+        new_data = p.first;
+        data_size = p.second;
+
+        Call_Guard guard(boost::bind(&MemoryManager::deallocate,
+                                     store(), new_data, data_size));
 
         for (;;) {
             const VT * d = vt();
@@ -273,6 +287,7 @@ public:
             
             if (set_version_table(d, new_version_table)) {
                 nv.release();  // no need to delete it now
+                guard.clear(); // no need to deallocate now
                 return true;
             }
         }

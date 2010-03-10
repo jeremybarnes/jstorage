@@ -38,6 +38,15 @@ using namespace ML;
 using namespace JMVCC;
 using namespace std;
 
+inline std::pair<size_t, size_t>
+serialize(MemoryManager & mm, const Obj & val)
+{
+    void * mem = mm.allocate_aligned(4, 4);
+    uint32_t * v = reinterpret_cast<uint32_t *>(mem);
+    *v = val.val;
+    return std::make_pair(mm.to_offset(mem), 4);
+}
+
 
 /*****************************************************************************/
 
