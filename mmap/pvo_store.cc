@@ -27,6 +27,10 @@ struct PVOStore::Itl {
         : owner(owner), mmap(creation, filename.c_str(), size)
     {
         root_offset = mmap.construct<uint64_t>("Root")(0);
+    }
+
+    void bootstrap_create()
+    {
         void * ptr = PVOManagerVersion::serialize(owner.exclusive(),
                                                   *owner.store());
         size_t offset = (const char *)ptr - (const char *)mmap.get_address();
@@ -47,7 +51,10 @@ struct PVOStore::Itl {
 
         if (*root_offset == 0)
             throw Exception("root_offset wasn't properly set");
+    }
 
+    void bootstrap_open()
+    {
         const void * mem = (const char *)mmap.get_address() + *root_offset;
 
         // Bootstrap the initial version into existence
@@ -64,17 +71,19 @@ PVOStore::
 PVOStore(const boost::interprocess::create_only_t & creation,
          const std::string & filename,
          size_t size)
-    : PVOManager(0, this),
+    : PVOManager(ROOT_OBJECT_ID, this),
       itl(new Itl(creation, filename, size, *this))
 {
+    itl->bootstrap_create();
 }
 
 PVOStore::
 PVOStore(const boost::interprocess::open_only_t & creation,
          const std::string & filename)
-    : PVOManager(0, this),
+    : PVOManager(ROOT_OBJECT_ID, this),
       itl(new Itl(creation, filename, *this))
 {
+    itl->bootstrap_open();
 }
 
 PVOStore::
@@ -115,6 +124,23 @@ PVOStore::
 deallocate(void * ptr, size_t bytes)
 {
     return itl->mmap.deallocate(ptr);
+}
+
+void
+PVOStore::
+set_persistent_version(ObjectId object, void * new_version)
+{
+    if (object == ROOT_OBJECT_ID) {
+        cerr << "setting version for ROOT_OBJECT_ID" << endl;
+        size_t new_offset
+            = (const char *)new_version - (const char *)itl->mmap.get_address();
+        cerr << "old_offset = " << *itl->root_offset << endl;
+        cerr << "new_offset = " << new_offset << endl;
+        *itl->root_offset = new_offset;
+        return;
+    }
+
+    PVOManager::set_persistent_version(object, new_version);
 }
 
 } // namespace JMVCC

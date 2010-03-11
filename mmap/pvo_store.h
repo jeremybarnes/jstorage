@@ -55,6 +55,8 @@ public:
 
     virtual void deallocate(void * offset, size_t bytes);
 
+    virtual void set_persistent_version(ObjectId object, void * new_version);
+
 private:
     class Itl;
     boost::scoped_ptr<Itl> itl;

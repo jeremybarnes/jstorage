@@ -18,6 +18,7 @@ namespace JMVCC {
 typedef uint64_t ObjectId;
 
 static const ObjectId NO_OBJECT_ID = (ObjectId)-1;
+static const ObjectId ROOT_OBJECT_ID = (ObjectId)-2;
 
 class PVOStore;
 class PVOManager;

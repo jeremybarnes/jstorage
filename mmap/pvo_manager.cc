@@ -66,14 +66,25 @@ PVOManagerVersion::
 serialize(const PVOManagerVersion & obj,
           MemoryManager & mm)
 {
-    size_t mem_needed = (obj.size() + 2) * 8;  // just a pointer each
+    size_t mem_needed = (obj.size() + 3) * 8;  // just a pointer each
     uint64_t * mem
         = (uint64_t *)mm.allocate_aligned(mem_needed, 8);
-    mem[0] = 0;  ++mem;  // version
-    mem[0] = obj.size();  ++mem;  // size
+
+    mem[0] = 0;  // version
+    mem[1] = obj.size();  // size
+    mem[2] = obj.object_count();  // size
+
+    cerr << "serialize" << endl;
+    cerr << "mem = " << mem << endl;
+    cerr << "obj.size() = " << obj.size() << " obj.object_count() = "
+         << obj.object_count() << endl;
+
+    mem += 3;
+
     for (unsigned i = 0;  i < obj.size();  ++i)
         mem[i] = obj[i].offset;
-    return mem;
+
+    return mem - 3;
 }
 
 void
@@ -84,17 +95,33 @@ reconstitute(PVOManagerVersion & obj,
 {
     const uint64_t * md = (const uint64_t *)mem;
     uint64_t ver = md[0];
-    uint64_t size = md[1];
+
+    cerr << "reconstitute" << endl;
+
+    cerr << "mem = " << mem << endl;
+
+    cerr << "ver = " << ver << endl;
 
     if (ver != 0)
         throw Exception("how do we deallocate unknown version");
+
+
+    uint64_t size = md[1];
+
+    cerr << "size = " << size << endl;
+
+    uint64_t object_count = md[2];
+
+    cerr << "object_count = " << object_count << endl;
+
 
     if (!obj.empty())
         throw Exception("reconstitution over non-empty version table");
 
     obj.resize(size);
+    obj.object_count_ = object_count;
     
-    const uint64_t * data = md + 2;
+    const uint64_t * data = md + 3;
 
     for (unsigned i = 0;  i < size;  ++i)
         obj[i].offset = data[i];
@@ -132,6 +159,8 @@ PVOManager::
 PVOManager(ObjectId id, PVOManager * owner)
     : Underlying(id, owner)
 {
+    cerr << "creating PVOManager " << this << " with ID " << id
+         << " and owner " << owner << endl;
 }
 
 PVO *
@@ -155,6 +184,8 @@ void
 PVOManager::
 set_persistent_version(ObjectId object, void * new_version)
 {
+    cerr << "set_persistent_version for " << object << endl;
+
     PVOManagerVersion & ver = mutate();
     if (object > ver.size())
         throw Exception("invalid object id");

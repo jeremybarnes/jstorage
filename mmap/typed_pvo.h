@@ -12,6 +12,8 @@
 #include "jmvcc/version_table.h"
 #include "serialization.h"
 #include "jml/utils/guard.h"
+#include "jml/arch/demangle.h"
+
 
 namespace JMVCC {
 
@@ -328,11 +330,14 @@ public:
 
         snapshot_info.register_cleanup(this, valid_from);
 
+        using namespace std;
+        cerr << "set_persistent_version for object " << id() << " of type "
+             << type_name<T>() << endl;
         owner()->set_persistent_version(id(), new_data);
         new_data = 0;
     }
 
-    virtual void rollback(Epoch new_epoch, void * local_version_table) throw ()
+    virtual void rollback(Epoch new_epoch, void * local_data) throw ()
     {
         // The commit didn't happen.  We need to:
         // 1.  Free up the memory associated with the object that we just
