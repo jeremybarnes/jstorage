@@ -308,6 +308,9 @@ public:
             valid_from = d->element(d->size() - 3).valid_to;
 
         snapshot_info.register_cleanup(this, valid_from);
+
+        owner()->set_persistent_version(id(), new_data);
+        new_data = 0;
     }
 
     virtual void rollback(Epoch new_epoch, void * local_version_table) throw ()
@@ -325,6 +328,8 @@ public:
             d2->pop_back(NEVER_PUBLISHED, EXCLUSIVE);
             if (set_version_table(d, d2)) return;
         }
+
+        free_new_data();
     }
 
     virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch)

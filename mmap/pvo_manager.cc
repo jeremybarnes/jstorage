@@ -127,11 +127,14 @@ object_count() const
     return read().object_count();
 }
 
-void *
+void
 PVOManager::
-allocate_aligned(size_t nbytes, size_t alignment)
+set_persistent_version(ObjectId object, void * new_version)
 {
-    return store()->allocate_aligned(nbytes, alignment);
+    PVOManagerVersion & ver = mutate();
+    if (object > ver.size())
+        throw Exception("invalid object id");
+    ver[object].offset = store()->to_offset(new_version);
 }
 
 } // namespace JMVCC

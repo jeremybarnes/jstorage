@@ -147,7 +147,10 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     size_t object_count() const;
 
-    virtual void * allocate_aligned(size_t nbytes, size_t alignment);
+    /** Set a new persistent version for an object.  This will record that
+        there is a new persistent version on disk for the given object, so
+        the pointer should be swapped and the current one cleaned up. */
+    void set_persistent_version(ObjectId object, void * new_version);
 };
 
 
