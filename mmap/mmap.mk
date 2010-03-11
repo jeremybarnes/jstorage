@@ -5,7 +5,8 @@
 MMAP_SOURCES := \
 	pvo_manager.cc \
 	pvo_store.cc \
-	pvo.cc
+	pvo.cc \
+	typed_pvo.cc
 
 MMAP_LINK :=
 

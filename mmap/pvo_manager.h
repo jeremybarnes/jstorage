@@ -11,6 +11,10 @@
 #include "pvo.h"
 #include <memory>
 #include "typed_pvo.h"
+#include <vector>
+#include "memory_manager.h"
+#include "jml/arch/exception.h"
+#include "serialization.h"
 
 #include <boost/shared_ptr.hpp>
 #include <boost/utility/enable_if.hpp>
@@ -66,6 +70,27 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
 
     void add(PVO * local);
 
+    template<typename TargetPVO>
+    TargetPVO * get(ObjectId obj, PVOManager * owner) const
+    {
+        PVOEntry & entry = const_cast<PVOEntry &>(at(obj));
+
+        if (entry.local) {
+            TargetPVO * result
+                = dynamic_cast<TargetPVO *>(entry.local.get());
+            if (!result)
+                throw ML::Exception("local object of wrong type");
+            return result;
+        }
+
+        std::auto_ptr<TargetPVO> result
+            (TargetPVO::reconstituted(obj, entry.offset, owner));
+
+        TargetPVO * res = result.get();
+        entry.local = result;
+        return res;
+    }
+
     size_t object_count_;
 
     size_t object_count() const
@@ -111,7 +136,7 @@ operator << (std::ostream & stream, const PVOManagerVersion & ver);
     disappeared.
 */
 
-struct PVOManager : protected TypedPVO<PVOManagerVersion> {
+struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     typedef TypedPVO<PVOManagerVersion> Underlying;
 
@@ -132,8 +157,8 @@ struct PVOManager : protected TypedPVO<PVOManagerVersion> {
     construct(const Arg1 & arg1)
     {
         std::auto_ptr<TargetPVO> result
-            (new TargetPVO(NO_OBJECT_ID, owner(), arg1));
-        mutate().add(result.get());
+            (new TargetPVO(NO_OBJECT_ID, this->owner(), arg1));
+        this->mutate().add(result.get());
         return result.release();
     }
     
@@ -146,8 +171,25 @@ struct PVOManager : protected TypedPVO<PVOManagerVersion> {
         return construct<TypedPVO<T> >(arg1);
     }
     
-    PVO *
-    lookup(ObjectId obj) const;
+    template<typename TargetPVO>
+    typename boost::enable_if<boost::is_base_of<PVO, TargetPVO>,
+                              TargetPVO *>::type
+    lookup(ObjectId obj) const
+    {
+        if (obj >= read().size())
+            throw ML::Exception("unknown object");
+        
+        return read().get<TargetPVO>(obj, const_cast<PVOManager *>(this));
+    }
+
+    template<typename T>
+    typename boost::disable_if<boost::is_base_of<PVO, T>,
+                               TypedPVO<T> *>::type
+    lookup(ObjectId obj) const
+    {
+        return lookup<TypedPVO<T> >(obj);
+    }
+
 
     size_t object_count() const;
 
@@ -171,3 +213,5 @@ private:
 } // namespace JMVCC
 
 #endif /* __jmvcc__pvo_manager_h__ */
+
+#include "typed_pvo_impl.h"

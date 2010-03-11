@@ -17,6 +17,10 @@
 
 namespace JMVCC {
 
+PVOStore * to_store(PVOManager * owner);
+void * to_pointer(PVOStore * store, size_t offset);
+
+
 /*****************************************************************************/
 /* TYPED_PVO                                                                  */
 /*****************************************************************************/
@@ -109,6 +113,17 @@ struct TypedPVO
     virtual size_t num_versions() const
     {
         return history_size();
+    }
+    
+    static TypedPVO<T> *
+    reconstituted(ObjectId id, size_t offset, PVOManager * owner)
+    {
+        std::auto_ptr<TypedPVO<T> > result(new TypedPVO<T>(id, owner));
+        
+        PVOStore * store = to_store(owner);
+        void * mem = to_pointer(store, offset);
+        Serializer<T>::reconstitute(result->exclusive(), mem, *store);
+        return result.release();
     }
 
 private:
@@ -450,3 +465,5 @@ public:
 } // namespace JMVCC
 
 #endif /* __jmvcc__typed_pvo_h__ */
+
+#include "typed_pvo_impl.h"

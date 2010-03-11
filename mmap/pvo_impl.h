@@ -9,7 +9,6 @@
 #define __jmvcc__pvo_impl_h__
 
 #include "pvo.h"
-#include "pvo_manager.h"
 
 namespace JMVCC {
 
@@ -17,15 +16,6 @@ namespace JMVCC {
 /* PVO                                                                       */
 /*****************************************************************************/
 
-#if 0
-inline
-PVOStore *
-PVO::
-store() const
-{
-    return owner_->store();
-}
-#endif
 
 } // namespace JMVCC
 

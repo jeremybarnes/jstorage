@@ -163,16 +163,6 @@ PVOManager(ObjectId id, PVOManager * owner)
          << " and owner " << owner << endl;
 }
 
-PVO *
-PVOManager::
-lookup(ObjectId obj) const
-{
-    if (obj >= read().size())
-        throw Exception("unknown object");
-    
-    return read().operator [] (obj).local.get();
-}
-
 size_t
 PVOManager::
 object_count() const

@@ -10,6 +10,7 @@
 
 #include "memory_manager.h"
 #include "jml/db/serialization_order.h"
+#include "jml/arch/exception.h"
 #include <boost/utility/enable_if.hpp>
 #include <boost/type_traits/is_arithmetic.hpp>
 
@@ -48,7 +49,7 @@ struct Serializer<T,
     static void * serialize(const T & val, MemoryManager & mm)
     {
         if (val != SA(val))
-            throw Exception("attempt to serialize type that doesn't fit");
+            throw ML::Exception("attempt to serialize type that doesn't fit");
         size_t sz = sizeof(SA);
         size_t al = __alignof__(SA);
         
