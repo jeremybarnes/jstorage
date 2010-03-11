@@ -46,8 +46,11 @@ struct Serializer<Obj> {
     static void * serialize(const Obj & obj, MemoryManager & mm)
     {
         void * mem = mm.allocate_aligned(4, 4);
-        uint32_t * v = reinterpret_cast<uint32_t *>(mem);
+        int32_t * v = reinterpret_cast<int32_t *>(mem);
         *v = obj.val;
+
+        cerr << "serializing Obj to " << mem << " wrote " << obj.val << endl;
+        
         return mem;
     }
 
@@ -60,8 +63,10 @@ struct Serializer<Obj> {
                              const void * mem,
                              MemoryManager & mm)
     {
-        const int * p = (const int *)mem;
+        const int32_t * p = (const int32_t *)mem;
         obj.val = *p;
+
+        cerr << "reconstituing Obj from " << mem << " got " << *p << endl;
     }
 };
 
