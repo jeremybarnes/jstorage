@@ -40,14 +40,22 @@ using namespace std;
 
 namespace JMVCC {
 
-inline std::pair<void *, size_t>
-serialize(const Obj & obj, MemoryManager & mm)
-{
-    void * mem = mm.allocate_aligned(4, 4);
-    uint32_t * v = reinterpret_cast<uint32_t *>(mem);
-    *v = obj.val;
-    return std::make_pair(mem, 4);
-}
+template<>
+struct Serializer<Obj> {
+
+    static void * serialize(const Obj & obj, MemoryManager & mm)
+    {
+        void * mem = mm.allocate_aligned(4, 4);
+        uint32_t * v = reinterpret_cast<uint32_t *>(mem);
+        *v = obj.val;
+        return mem;
+    }
+
+    static void deallocate(void * mem, MemoryManager & mm)
+    {
+        mm.deallocate(mem, 4);
+    }
+};
 
 } // namespace JMVCC
 

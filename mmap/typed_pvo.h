@@ -39,6 +39,8 @@ struct TypedPVO
     {
         VT * d = const_cast< VT * > (vt());
         VT::free(d, PUBLISHED, EXCLUSIVE);
+        if (new_data)
+            throw Exception("new_data still present in destructor");
     }
     
     // Client interface.  Just two methods to get at the current value.
@@ -139,6 +141,12 @@ private:
         else VT::free(const_cast<VT *>(old_version_table), PUBLISHED, SHARED);
 
         return result;
+    }
+
+    void free_new_data()
+    {
+        Serializer<T>::deallocate(new_data, *store());
+        new_data = 0;
     }
         
 public:
@@ -265,13 +273,9 @@ public:
         if (new_data)
             throw Exception("setup() with new_data already set");
 
-        size_t data_size;
-        std::pair<void *, size_t> p = serialize(*nv, *store());
-        new_data = p.first;
-        data_size = p.second;
+        new_data = Serializer<T>::serialize(*nv, *store());
 
-        Call_Guard guard(boost::bind(&MemoryManager::deallocate,
-                                     store(), new_data, data_size));
+        Call_Guard guard(boost::bind(&TypedPVO<T>::free_new_data, this));
 
         for (;;) {
             const VT * d = vt();

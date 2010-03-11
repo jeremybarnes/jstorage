@@ -61,30 +61,42 @@ add(PVO * local)
     ++object_count_;
 }
 
-std::pair<void *, size_t>
+void *
 PVOManagerVersion::
-serialize(PVOStore & store) const
+serialize(const PVOManagerVersion & obj,
+          MemoryManager & mm)
 {
-    size_t mem_needed = (size() + 2) * 8;  // just a pointer each
+    size_t mem_needed = (obj.size() + 2) * 8;  // just a pointer each
     uint64_t * mem
-        = (uint64_t *)store.allocate_aligned(mem_needed, 8);
+        = (uint64_t *)mm.allocate_aligned(mem_needed, 8);
     mem[0] = 0;  ++mem;  // version
-    mem[0] = size();  ++mem;  // size
-    for (unsigned i = 0;  i < size();  ++i)
-        mem[i] = operator [] (i).offset;
-    return std::make_pair(mem, mem_needed);
+    mem[0] = obj.size();  ++mem;  // size
+    for (unsigned i = 0;  i < obj.size();  ++i)
+        mem[i] = obj[i].offset;
+    return mem;
+}
+
+void
+PVOManagerVersion::
+deallocate(void * mem, MemoryManager & mm)
+{
+    const uint64_t * md = (const uint64_t *)mem;
+    uint64_t ver = md[0];
+    uint64_t size = md[1];
+
+    if (ver != 0)
+        throw Exception("how do we deallocate unknown version");
+
+    
+    size_t mem_needed = (size + 2) * 8;
+    
+    mm.deallocate(mem, mem_needed);
 }
 
 std::ostream &
 operator << (std::ostream & stream, const PVOManagerVersion & ver)
 {
     return stream;
-}
-
-std::pair<void *, size_t>
-serialize(const PVOManagerVersion & version, PVOStore & store)
-{
-    return version.serialize(store);
 }
 
 
