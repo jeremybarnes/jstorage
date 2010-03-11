@@ -72,19 +72,16 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
     {
         return object_count_;
     }
-
-    void * serialize(PVOStore * store) const;
-
-    void reconstitute(PVOStore * store,
-                      PVOManager * owner,
-                      const char * data);
+    
+    std::pair<void *, size_t>
+    serialize(PVOStore & store) const;
 };
 
 std::ostream &
 operator << (std::ostream & stream, const PVOManagerVersion & ver);
 
-std::pair<size_t, size_t>
-serialize(PVOStore & store, const PVOManagerVersion & version);
+std::pair<void *, size_t>
+serialize(const PVOManagerVersion & version, PVOStore & store);
 
 
 /*****************************************************************************/

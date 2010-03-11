@@ -53,7 +53,7 @@ struct PVO : public JMVCC::Versioned_Object {
     }
 
     /** What store are we in? */
-    PVOStore * store() const;
+    virtual PVOStore * store() const;
 
     /** How many versions of the object are there? */
     virtual size_t num_versions() const = 0;

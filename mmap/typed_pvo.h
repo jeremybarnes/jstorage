@@ -117,8 +117,9 @@ private:
     // The single internal version_table member.  Updated atomically.
     mutable VT * version_table;
 
-    // The location of the new data member when making a commit
-    size_t new_data;
+    // The location of the new data member when making a commit; pointer to
+    // disk
+    void * new_data;
 
     const VT * vt() const
     {
@@ -265,7 +266,7 @@ public:
             throw Exception("setup() with new_data already set");
 
         size_t data_size;
-        std::pair<size_t, size_t> p = serialize(*store(), *nv);
+        std::pair<void *, size_t> p = serialize(*nv, *store());
         new_data = p.first;
         data_size = p.second;
 

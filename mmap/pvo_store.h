@@ -45,11 +45,15 @@ public:
 
     virtual ~PVOStore();
 
-    virtual size_t to_offset(void * pointer) const;
+    virtual PVOStore * store() const;
 
     virtual void * allocate_aligned(size_t nbytes, size_t alignment);
 
-    virtual void deallocate(size_t offset, size_t bytes);
+    virtual size_t to_offset(void * pointer) const;
+
+    virtual void * to_pointer(size_t offset) const;
+
+    virtual void deallocate(void * offset, size_t bytes);
 
 private:
     class Itl;

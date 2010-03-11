@@ -59,11 +59,39 @@ PVOStore::
 {
 }
 
+PVOStore *
+PVOStore::
+store() const
+{
+    return const_cast<PVOStore *>(this);
+}
+
 void *
 PVOStore::
 allocate_aligned(size_t nbytes, size_t alignment)
 {
     return itl->mmap.allocate_aligned(nbytes, alignment);
+}
+
+size_t
+PVOStore::
+to_offset(void * pointer) const
+{
+    return (const char *)pointer - (const char *)itl->mmap.get_address();
+}
+
+void *
+PVOStore::
+to_pointer(size_t offset) const
+{
+    return (char *)itl->mmap.get_address() + offset;
+}
+
+void
+PVOStore::
+deallocate(void * ptr, size_t bytes)
+{
+    return itl->mmap.deallocate(ptr);
 }
 
 } // namespace JMVCC

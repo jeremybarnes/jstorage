@@ -61,30 +61,30 @@ add(PVO * local)
     ++object_count_;
 }
 
-void *
+std::pair<void *, size_t>
 PVOManagerVersion::
-serialize(PVOStore * store) const
+serialize(PVOStore & store) const
 {
-    size_t mem_needed = size() * 8;  // just a pointer each
+    size_t mem_needed = (size() + 2) * 8;  // just a pointer each
     uint64_t * mem
-        = (uint64_t *)store->allocate_aligned(mem_needed, 8);
+        = (uint64_t *)store.allocate_aligned(mem_needed, 8);
+    mem[0] = 0;  ++mem;  // version
+    mem[0] = size();  ++mem;  // size
     for (unsigned i = 0;  i < size();  ++i)
         mem[i] = operator [] (i).offset;
-    return mem;
-}
-
-void
-PVOManagerVersion::
-reconstitute(PVOStore * store,
-             PVOManager * owner,
-             const char * data)
-{
+    return std::make_pair(mem, mem_needed);
 }
 
 std::ostream &
 operator << (std::ostream & stream, const PVOManagerVersion & ver)
 {
     return stream;
+}
+
+std::pair<void *, size_t>
+serialize(const PVOManagerVersion & version, PVOStore & store)
+{
+    return version.serialize(store);
 }
 
 
