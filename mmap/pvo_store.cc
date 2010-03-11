@@ -22,18 +22,41 @@ namespace JMVCC {
 struct PVOStore::Itl {
     Itl(const boost::interprocess::create_only_t & creation,
         const std::string & filename,
-        size_t size)
-        : mmap(creation, filename.c_str(), size)
+        size_t size,
+        PVOStore & owner)
+        : owner(owner), mmap(creation, filename.c_str(), size)
     {
+        root_offset = mmap.construct<uint64_t>("Root")(0);
+        void * ptr = PVOManagerVersion::serialize(owner.exclusive(),
+                                                  *owner.store());
+        size_t offset = (const char *)ptr - (const char *)mmap.get_address();
+        *root_offset = offset;
     }
 
     Itl(const boost::interprocess::open_only_t & creation,
-        const std::string & filename)
-        : mmap(creation, filename.c_str())
+        const std::string & filename,
+        PVOStore & owner)
+        : owner(owner), mmap(creation, filename.c_str())
     {
+        size_t num_objects;
+        boost::tie(root_offset, num_objects)
+            = mmap.find<uint64_t>("Root");
+        
+        if (root_offset == 0 || num_objects != 1)
+            throw Exception("couldn't find root offset");
+
+        if (*root_offset == 0)
+            throw Exception("root_offset wasn't properly set");
+
+        const void * mem = (const char *)mmap.get_address() + *root_offset;
+
+        // Bootstrap the initial version into existence
+        PVOManagerVersion::reconstitute(owner.exclusive(), mem, *owner.store());
     }
 
+    PVOStore & owner;
     boost::interprocess::managed_mapped_file mmap;
+    uint64_t * root_offset;
 };
 
 
@@ -42,7 +65,7 @@ PVOStore(const boost::interprocess::create_only_t & creation,
          const std::string & filename,
          size_t size)
     : PVOManager(0, this),
-      itl(new Itl(creation, filename, size))
+      itl(new Itl(creation, filename, size, *this))
 {
 }
 
@@ -50,7 +73,7 @@ PVOStore::
 PVOStore(const boost::interprocess::open_only_t & creation,
          const std::string & filename)
     : PVOManager(0, this),
-      itl(new Itl(creation, filename))
+      itl(new Itl(creation, filename, *this))
 {
 }
 

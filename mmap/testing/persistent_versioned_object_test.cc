@@ -229,7 +229,7 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
 BOOST_AUTO_TEST_CASE( test_persistence )
 {
     const char * fname = "pvot_backing4";
-    remove_file_on_destroy destroyer1(fname);
+    //remove_file_on_destroy destroyer1(fname);
     unlink(fname);
 
     constructed = destroyed = 0;

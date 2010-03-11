@@ -76,6 +76,10 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
     static void * serialize(const PVOManagerVersion & obj,
                             MemoryManager & mm);
     static void deallocate(void * mem, MemoryManager & mm);
+
+    static void reconstitute(PVOManagerVersion & obj,
+                             const void * mem,
+                             MemoryManager & mm);
 };
 
 template<>
@@ -107,7 +111,7 @@ operator << (std::ostream & stream, const PVOManagerVersion & ver);
     disappeared.
 */
 
-struct PVOManager : public TypedPVO<PVOManagerVersion> {
+struct PVOManager : protected TypedPVO<PVOManagerVersion> {
 
     typedef TypedPVO<PVOManagerVersion> Underlying;
 
@@ -151,6 +155,16 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
         there is a new persistent version on disk for the given object, so
         the pointer should be swapped and the current one cleaned up. */
     void set_persistent_version(ObjectId object, void * new_version);
+
+private:
+    PVOManager();
+    PVOManager(ObjectId id, PVOManager * owner,
+               const PVOManagerVersion & version);
+
+    void swap(PVOManager & other)
+    {
+        Underlying::swap(other);
+    }
 };
 
 

@@ -27,7 +27,7 @@ namespace JMVCC {
 
 template<typename T>
 struct TypedPVO
-    : public PVO {
+    : public PVO, boost::noncopyable {
 
     TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
         : PVO(id, owner), new_data(0)
@@ -41,6 +41,15 @@ struct TypedPVO
         VT::free(d, PUBLISHED, EXCLUSIVE);
         if (new_data)
             throw Exception("new_data still present in destructor");
+    }
+
+    // Note that this can't be used if the object was ever published as it's
+    // not atomic.
+    void swap(TypedPVO & other)
+    {
+        std::swap(version_table, other.version_table);
+        if (new_data != other.new_data)
+            std::swap(new_data, other.new_data);
     }
     
     // Client interface.  Just two methods to get at the current value.
@@ -58,6 +67,16 @@ struct TypedPVO
         }
         
         return *local;
+    }
+
+    // ONLY for when there is external locking and NO other thread could ever
+    // be in a critical section at the same time.  Modifies the underlying
+    // objects directly.  Note that the object obtained is always that for
+    // the current epoch.
+    T & exclusive()
+    {
+        const T * value = value_at_epoch(get_current_epoch());
+        return *const_cast<T *>(value);
     }
 
     void write(const T & val)

@@ -31,7 +31,7 @@ namespace JMVCC {
     3.  Keeps track of the allocated and free memory in the region
 */
 
-struct PVOStore : public PVOManager, public MemoryManager, boost::noncopyable {
+struct PVOStore : public PVOManager, public MemoryManager {
     
 public:
     // Create a new persistent object store

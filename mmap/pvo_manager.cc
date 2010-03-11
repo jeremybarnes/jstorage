@@ -78,6 +78,30 @@ serialize(const PVOManagerVersion & obj,
 
 void
 PVOManagerVersion::
+reconstitute(PVOManagerVersion & obj,
+             const void * mem,
+             MemoryManager & mm)
+{
+    const uint64_t * md = (const uint64_t *)mem;
+    uint64_t ver = md[0];
+    uint64_t size = md[1];
+
+    if (ver != 0)
+        throw Exception("how do we deallocate unknown version");
+
+    if (!obj.empty())
+        throw Exception("reconstitution over non-empty version table");
+
+    obj.resize(size);
+    
+    const uint64_t * data = md + 2;
+
+    for (unsigned i = 0;  i < size;  ++i)
+        obj[i].offset = data[i];
+}
+
+void
+PVOManagerVersion::
 deallocate(void * mem, MemoryManager & mm)
 {
     const uint64_t * md = (const uint64_t *)mem;
