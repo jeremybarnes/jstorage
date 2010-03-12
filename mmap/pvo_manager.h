@@ -20,6 +20,8 @@
 #include <boost/utility/enable_if.hpp>
 #include <boost/type_traits/is_base_of.hpp>
 
+#include "jml/arch/backtrace.h"
+
 
 namespace JMVCC {
 
@@ -30,28 +32,28 @@ namespace JMVCC {
 
 struct PVOEntry {
 
+    static const uint64_t NO_OFFSET = (uint64_t)-1;
+
     PVOEntry()
+        : offset(NO_OFFSET)
     {
     }
 
     struct PVODestroyer {
         void operator () (PVO * x) const
         {
+            using namespace std;
+            cerr << "deleting " << x << endl;
             delete x;
         }
     };
 
 
-    PVOEntry(PVO * local)
+    PVOEntry(const boost::shared_ptr<PVO> & local)
+        : offset(NO_OFFSET), local(local)
     {
-        set_local(local);
     }
     
-    void set_local(PVO * new_local)
-    {
-        local.reset(new_local, PVODestroyer());
-    }
-
     uint64_t offset;
     boost::shared_ptr<PVO> local;
 };
@@ -75,24 +77,43 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
 
     ~PVOManagerVersion();
 
-    ObjectId add(PVO * local);
+    template<typename TargetPVO, typename Arg1>
+    boost::shared_ptr<TargetPVO>
+    construct(const Arg1 & arg1, PVOManager * owner)
+    {
+        ObjectId id = size();
+
+        boost::shared_ptr<TargetPVO> result
+            (new TargetPVO(id, owner, arg1), PVOEntry::PVODestroyer());
+
+        push_back(PVOEntry(result));
+        ++object_count_;
+
+        return result;
+    }
 
     template<typename TargetPVO>
-    TargetPVO * get(ObjectId obj, PVOManager * owner) const
+    boost::shared_ptr<TargetPVO>
+    get(ObjectId obj, PVOManager * owner) const
     {
         PVOEntry & entry = const_cast<PVOEntry &>(at(obj));
 
         if (entry.local) {
-            TargetPVO * result
-                = dynamic_cast<TargetPVO *>(entry.local.get());
+            boost::shared_ptr<TargetPVO> result
+                = boost::dynamic_pointer_cast<TargetPVO>(entry.local);
             if (!result)
                 throw ML::Exception("local object of wrong type");
             return result;
         }
 
-        TargetPVO * result
-            = TargetPVO::reconstituted(obj, entry.offset, owner);
-        entry.set_local(result);
+        if (entry.offset == PVOEntry::NO_OFFSET)
+            throw Exception("getting local object with no offset");
+
+        boost::shared_ptr<TargetPVO> result
+            (TargetPVO::reconstituted(obj, entry.offset, owner),
+             PVOEntry::PVODestroyer());
+
+        entry.local = result;
         return result;
     }
 
@@ -147,34 +168,19 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     PVOManager(ObjectId id, PVOManager * owner);
 
-    template<typename TargetPVO>
-    TargetPVO * construct()
-    {
-        std::auto_ptr<TargetPVO> result(new TargetPVO(NO_OBJECT_ID, this));
-        return result.release();
-    }
-    
     // Construct a given object type
     template<typename TargetPVO, typename Arg1>
     typename boost::enable_if<boost::is_base_of<PVO, TargetPVO>,
-                              TargetPVO *>::type
+                              boost::shared_ptr<TargetPVO> >::type
     construct(const Arg1 & arg1)
     {
-        TargetPVO * result = new TargetPVO(this->owner(), arg1);
-        try {
-            this->mutate().add(result);
-            return result;
-        }
-        catch (...) {
-            delete result;
-            throw;
-        }
+        return mutate().construct<TargetPVO>(arg1, this);
     }
     
     // Construct a typed PVO
     template<typename T, typename Arg1>
     typename boost::disable_if<boost::is_base_of<PVO, T>,
-                               TypedPVO<T> *>::type
+                               boost::shared_ptr<TypedPVO<T> > >::type
     construct(const Arg1 & arg1)
     {
         return construct<TypedPVO<T> >(arg1);
@@ -182,7 +188,7 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
     
     template<typename TargetPVO>
     typename boost::enable_if<boost::is_base_of<PVO, TargetPVO>,
-                              TargetPVO *>::type
+                              boost::shared_ptr<TargetPVO> >::type
     lookup(ObjectId obj) const
     {
         if (obj >= read().size())
@@ -193,7 +199,7 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     template<typename T>
     typename boost::disable_if<boost::is_base_of<PVO, T>,
-                               TypedPVO<T> *>::type
+                               boost::shared_ptr<TypedPVO<T> > >::type
     lookup(ObjectId obj) const
     {
         return lookup<TypedPVO<T> >(obj);
@@ -202,11 +208,13 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     size_t object_count() const;
 
+#if 0
     /** Add the given PVO to the current sandbox's version of this table. */
     ObjectId add(PVO * pvo)
     {
         return mutate().add(pvo);
     }
+#endif
 
     /** Set a new persistent version for an object.  This will record that
         there is a new persistent version on disk for the given object, so

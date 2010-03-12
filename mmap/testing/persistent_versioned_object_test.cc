@@ -63,6 +63,9 @@ struct Serializer<Obj> {
                              const void * mem,
                              MemoryManager & mm)
     {
+        cerr << "&obj = " << &obj << endl;
+        cerr << "mem = " << mem << endl;
+
         const int32_t * p = (const int32_t *)mem;
         obj.val = *p;
 
@@ -117,7 +120,7 @@ BOOST_AUTO_TEST_CASE( test_typedpvo_destroyed )
 
         {
             Local_Transaction trans;
-            PVORef<int> tpvo = store.construct<int>(1);
+            PVORef<Obj> tpvo = store.construct<Obj>(1);
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
         }
 
@@ -125,7 +128,7 @@ BOOST_AUTO_TEST_CASE( test_typedpvo_destroyed )
 
         {
             Local_Transaction trans;
-            PVORef<int> tpvo2 = store.construct<int>(2);
+            PVORef<Obj> tpvo2 = store.construct<Obj>(2);
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);
             trans.commit();
             BOOST_CHECK_EQUAL(constructed, destroyed + 1);

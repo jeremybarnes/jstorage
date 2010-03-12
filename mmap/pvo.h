@@ -9,6 +9,7 @@
 #define __jmvcc__pvo_h__
 
 #include <stdint.h>
+#include <boost/shared_ptr.hpp>
 #include "jmvcc/versioned_object.h"
 
 
@@ -55,10 +56,6 @@ struct PVO : public JMVCC::Versioned_Object {
     virtual size_t num_versions() const = 0;
 
 protected:
-    /** Construct a new object for the local transaction and allow the
-        owner to assign an ID for it */
-    PVO(PVOManager * owner);
-
     PVO(ObjectId id, PVOManager * owner)
         : id_(id), owner_(owner)
     {
@@ -94,22 +91,24 @@ private:
 
 template<typename Obj, typename TargetPVO = TypedPVO<Obj> >
 struct PVORef {
-    PVORef(TargetPVO * pvo = 0)
-        : pvo(pvo), obj(0), rw(false)
+    PVORef()
     {
     }
 
-    PVORef(PVO * pvo)
-        : pvo(dynamic_cast<TargetPVO *>(pvo)), obj(0), rw(false)
+    PVORef(const boost::shared_ptr<TargetPVO> & pvo)
+        : pvo(pvo)
     {
     }
 
-    TargetPVO * pvo;
-    Obj * obj;
-    bool rw;
+    PVORef(const boost::shared_ptr<PVO> & pvo)
+        : pvo(boost::dynamic_pointer_cast<TargetPVO>(pvo))
+    {
+    }
 
+    boost::shared_ptr<TargetPVO> pvo;
+    
     ObjectId id() const { return pvo->id(); }
-
+    
     operator const Obj () const { return pvo->read(); }
 
     const Obj & read() const { return pvo->read(); }

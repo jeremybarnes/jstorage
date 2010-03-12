@@ -52,16 +52,6 @@ PVOManagerVersion::
     clear();
 }
 
-ObjectId
-PVOManagerVersion::
-add(PVO * local)
-{
-    ObjectId result = size();
-    push_back(PVOEntry(local));
-    ++object_count_;
-    return result;
-}
-
 void *
 PVOManagerVersion::
 serialize(const PVOManagerVersion & obj,

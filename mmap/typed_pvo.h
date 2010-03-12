@@ -35,20 +35,6 @@ template<typename T>
 struct TypedPVO
     : public PVO, boost::noncopyable {
 
-    /** Create it and add it to the current transaction. */
-    TypedPVO(PVOManager * owner, const T & val = T())
-        : PVO(owner), new_data(0)
-    {
-        version_table = VT::create(new T(val), 1);
-    }
-    
-    /** Create it with the given ID and owner, but don't add it anywhere */
-    TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
-        : PVO(id, owner), new_data(0)
-    {
-        version_table = VT::create(new T(val), 1);
-    }
-    
     // Client interface.  Just two methods to get at the current value.
     T & mutate()
     {
@@ -191,7 +177,22 @@ private:
 protected:
     // Needs to be able to call the destructor
     friend class PVOManager;
+    friend class PVOManagerVersion;
 
+    /** Create it and add it to the current transaction. */
+    TypedPVO(PVOManager * owner, const T & val = T())
+        : PVO(owner), new_data(0)
+    {
+        version_table = VT::create(new T(val), 1);
+    }
+    
+    /** Create it with the given ID and owner, but don't add it anywhere */
+    TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
+        : PVO(id, owner), new_data(0)
+    {
+        version_table = VT::create(new T(val), 1);
+    }
+    
     ~TypedPVO()
     {
         VT * d = const_cast< VT * > (vt());
