@@ -16,12 +16,19 @@ namespace JMVCC {
 /* PVO                                                                       */
 /*****************************************************************************/
 
+PVO::
+PVO(PVOManager * owner)
+    : id_(owner->add(this)), owner_(owner)
+{
+}
+
 PVOStore *
 PVO::
 store() const
 {
     return owner_->store();
 }
+
 
 
 } // namespace JMVCC

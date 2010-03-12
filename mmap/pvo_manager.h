@@ -34,18 +34,25 @@ struct PVOEntry {
     {
     }
 
-    PVOEntry(PVO * local)
-        : local(local)
-    {
-    }
-        
-    union {
-        struct {
-            uint64_t offset;
-        };
-        uint64_t bits;
+    struct PVODestroyer {
+        void operator () (PVO * x) const
+        {
+            delete x;
+        }
     };
-        
+
+
+    PVOEntry(PVO * local)
+    {
+        set_local(local);
+    }
+    
+    void set_local(PVO * new_local)
+    {
+        local.reset(new_local, PVODestroyer());
+    }
+
+    uint64_t offset;
     boost::shared_ptr<PVO> local;
 };
 
@@ -68,7 +75,7 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
 
     ~PVOManagerVersion();
 
-    void add(PVO * local);
+    ObjectId add(PVO * local);
 
     template<typename TargetPVO>
     TargetPVO * get(ObjectId obj, PVOManager * owner) const
@@ -83,12 +90,10 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
             return result;
         }
 
-        std::auto_ptr<TargetPVO> result
-            (TargetPVO::reconstituted(obj, entry.offset, owner));
-
-        TargetPVO * res = result.get();
-        entry.local = result;
-        return res;
+        TargetPVO * result
+            = TargetPVO::reconstituted(obj, entry.offset, owner);
+        entry.set_local(result);
+        return result;
     }
 
     size_t object_count_;
@@ -145,8 +150,7 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
     template<typename TargetPVO>
     TargetPVO * construct()
     {
-        std::auto_ptr<TargetPVO> result(new TargetPVO(NO_OBJECT_ID, owner()));
-        mutate().add(result.get());
+        std::auto_ptr<TargetPVO> result(new TargetPVO(NO_OBJECT_ID, this));
         return result.release();
     }
     
@@ -156,10 +160,15 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
                               TargetPVO *>::type
     construct(const Arg1 & arg1)
     {
-        std::auto_ptr<TargetPVO> result
-            (new TargetPVO(NO_OBJECT_ID, this->owner(), arg1));
-        this->mutate().add(result.get());
-        return result.release();
+        TargetPVO * result = new TargetPVO(this->owner(), arg1);
+        try {
+            this->mutate().add(result);
+            return result;
+        }
+        catch (...) {
+            delete result;
+            throw;
+        }
     }
     
     // Construct a typed PVO
@@ -193,10 +202,24 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     size_t object_count() const;
 
+    /** Add the given PVO to the current sandbox's version of this table. */
+    ObjectId add(PVO * pvo)
+    {
+        return mutate().add(pvo);
+    }
+
     /** Set a new persistent version for an object.  This will record that
         there is a new persistent version on disk for the given object, so
         the pointer should be swapped and the current one cleaned up. */
     virtual void set_persistent_version(ObjectId object, void * new_version);
+
+    /* Override these to deal with created or deleted objects. */
+    virtual bool check(Epoch old_epoch, Epoch new_epoch,
+                       void * new_value) const;
+    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * new_value);
+    virtual void commit(Epoch new_epoch) throw ();
+    virtual void rollback(Epoch new_epoch, void * local_data) throw ();
+    
 
 private:
     PVOManager();

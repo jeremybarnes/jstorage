@@ -36,11 +36,6 @@ template<typename T> class TypedPVO;
 
 struct PVO : public JMVCC::Versioned_Object {
 
-    PVO(ObjectId id, PVOManager * owner)
-        : id_(id), owner_(owner)
-    {
-    }
-
     /** Return the immutable identity of the object */
     ObjectId id() const
     {
@@ -59,10 +54,29 @@ struct PVO : public JMVCC::Versioned_Object {
     /** How many versions of the object are there? */
     virtual size_t num_versions() const = 0;
 
+protected:
+    /** Construct a new object for the local transaction and allow the
+        owner to assign an ID for it */
+    PVO(PVOManager * owner);
+
+    PVO(ObjectId id, PVOManager * owner)
+        : id_(id), owner_(owner)
+    {
+    }
+
+    /** The destructor is protected as only the PVOManager is allowed to
+        actually delete a PVO.  In order to remove it from the current
+        snapshot, call remove(). */
+    ~PVO()
+    {
+    }
+
 private:
     ObjectId id_;  ///< Identity in the memory mapped region
     PVOManager * owner_;  ///< Responsible for dealing with it
 
+    friend class PVOEntry;
+    friend class PVOManager;
     friend class PVOManagerVersion;
 };
 

@@ -22,7 +22,7 @@ void * to_pointer(PVOStore * store, size_t offset);
 
 
 /*****************************************************************************/
-/* TYPED_PVO                                                                  */
+/* TYPED_PVO                                                                 */
 /*****************************************************************************/
 
 /** Note that an addressable object potentially has multiple versions:
@@ -35,27 +35,18 @@ template<typename T>
 struct TypedPVO
     : public PVO, boost::noncopyable {
 
-    TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
-        : PVO(id, owner), new_data(0)
+    /** Create it and add it to the current transaction. */
+    TypedPVO(PVOManager * owner, const T & val = T())
+        : PVO(owner), new_data(0)
     {
         version_table = VT::create(new T(val), 1);
     }
     
-    ~TypedPVO()
+    /** Create it with the given ID and owner, but don't add it anywhere */
+    TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
+        : PVO(id, owner), new_data(0)
     {
-        VT * d = const_cast< VT * > (vt());
-        VT::free(d, PUBLISHED, EXCLUSIVE);
-        if (new_data)
-            throw Exception("new_data still present in destructor");
-    }
-
-    // Note that this can't be used if the object was ever published as it's
-    // not atomic.
-    void swap(TypedPVO & other)
-    {
-        std::swap(version_table, other.version_table);
-        if (new_data != other.new_data)
-            std::swap(new_data, other.new_data);
+        version_table = VT::create(new T(val), 1);
     }
     
     // Client interface.  Just two methods to get at the current value.
@@ -104,6 +95,12 @@ struct TypedPVO
         return *result;
     }
 
+    void remove()
+    {
+        if (!current_trans) no_transaction_exception(this);
+        
+    }
+    
     size_t history_size() const
     {
         size_t result = vt()->size() - 1;
@@ -118,12 +115,18 @@ struct TypedPVO
     static TypedPVO<T> *
     reconstituted(ObjectId id, size_t offset, PVOManager * owner)
     {
-        std::auto_ptr<TypedPVO<T> > result(new TypedPVO<T>(id, owner));
+        TypedPVO<T> * result = new TypedPVO<T>(id, owner);
         
-        PVOStore * store = to_store(owner);
-        void * mem = to_pointer(store, offset);
-        Serializer<T>::reconstitute(result->exclusive(), mem, *store);
-        return result.release();
+        try {
+            PVOStore * store = to_store(owner);
+            void * mem = to_pointer(store, offset);
+
+            Serializer<T>::reconstitute(result->exclusive(), mem, *store);
+            return result;
+        } catch (...) {
+            delete result;
+            throw;
+        }
     }
 
 private:
@@ -183,6 +186,27 @@ private:
     {
         Serializer<T>::deallocate(new_data, *store());
         new_data = 0;
+    }
+
+protected:
+    // Needs to be able to call the destructor
+    friend class PVOManager;
+
+    ~TypedPVO()
+    {
+        VT * d = const_cast< VT * > (vt());
+        VT::free(d, PUBLISHED, EXCLUSIVE);
+        if (new_data)
+            throw Exception("new_data still present in destructor");
+    }
+
+    // Note that this can't be used if the object was ever published as it's
+    // not atomic.
+    void swap(TypedPVO & other)
+    {
+        std::swap(version_table, other.version_table);
+        if (new_data != other.new_data)
+            std::swap(new_data, other.new_data);
     }
         
 public:
@@ -304,6 +328,7 @@ public:
         //
         // Again the free is deferred
 
+        // TODO: don't copy; steal
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
 
         if (new_data)

@@ -52,13 +52,14 @@ PVOManagerVersion::
     clear();
 }
 
-void
+ObjectId
 PVOManagerVersion::
 add(PVO * local)
 {
-    local->id_ = size();
+    ObjectId result = size();
     push_back(PVOEntry(local));
     ++object_count_;
+    return result;
 }
 
 void *
@@ -180,6 +181,79 @@ set_persistent_version(ObjectId object, void * new_version)
     if (object > ver.size())
         throw Exception("invalid object id");
     ver[object].offset = store()->to_offset(new_version);
+}
+
+bool
+PVOManager::
+check(Epoch old_epoch, Epoch new_epoch,
+      void * new_value) const
+{
+    return Underlying::check(old_epoch, new_epoch, new_value);
+}
+
+bool
+PVOManager::
+setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
+{
+    return Underlying::setup(old_epoch, new_epoch, new_value);
+#if 0
+    // Get the new version table to set it up
+    PVOManagerVersion & new_version
+        = *reinterpret_cast<PVOManagerVersion *>(new_value);
+    
+    // Get the old version table to compare against
+    const PVOManagerVersion & old_version
+        = read();
+
+    // Get the old and the new table so that we can tell which objects
+    // have new values and need to be serialized
+
+    for (unsigned i = 0;  i < new_version.size();  ++i) {
+        if (i >= old_version.size()) {
+            // new version; serialize it
+            bool serialized = ...;
+        }
+    }
+
+    // First, serialize all of the objects that are either new or have
+    // changed value
+    const PVOManagerVersion & new_version
+        = 
+
+    Call_Guard guard(boost::bind(&PVOManager::rollback_new_values, this));
+
+    // Serialize the new version table
+    bool result = Underlying::setup(old_epoch, new_epoch, new_value);
+
+    // If it succeeded, we don't need to roll back any of them
+    if (result) guard.reset();
+
+    return result;
+#endif
+}
+
+void
+PVOManager::
+commit(Epoch new_epoch) throw ()
+{
+    // Firstly, arrange for all of the old versions to be cleaned up
+    
+
+    // Secondly, write the new table
+    Underlying::commit(new_epoch);
+
+}
+
+void
+PVOManager::
+rollback(Epoch new_epoch, void * local_data) throw ()
+{
+    // First, free all of the objects that had their value changed
+    //rollback_new_values();
+
+    // Now rollback the previous ones
+
+    return Underlying::rollback(new_epoch, local_data);
 }
 
 } // namespace JMVCC

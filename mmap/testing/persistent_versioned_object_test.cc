@@ -107,13 +107,32 @@ BOOST_AUTO_TEST_CASE( test_construct_in_trans1 )
 
 BOOST_AUTO_TEST_CASE( test_typedpvo_destroyed )
 {
+    const char * fname = "pvot_backing1a";
+    remove_file_on_destroy destroyer1(fname);
+    unlink(fname);
+
     constructed = destroyed = 0;
     {
-        TypedPVO<Obj> tpvo(0, 0, 1);
+        PVOStore store(create_only, fname, 65536);
+
+        {
+            Local_Transaction trans;
+            PVORef<int> tpvo = store.construct<int>(1);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+        }
+
+        BOOST_CHECK_EQUAL(constructed, destroyed);
+
+        {
+            Local_Transaction trans;
+            PVORef<int> tpvo2 = store.construct<int>(2);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            trans.commit();
+            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+        }
         BOOST_CHECK_EQUAL(constructed, destroyed + 1);
-
     }    
-
+    
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
