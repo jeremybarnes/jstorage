@@ -60,7 +60,7 @@ struct Versioned : public Versioned_Object {
     T & mutate()
     {
         if (!current_trans) no_transaction_exception(this);
-        T * local = current_trans->local_value<T>(this);
+        T * local = current_trans->local_value<T>(this).first;
 
         if (!local) {
             T value;
@@ -90,7 +90,7 @@ struct Versioned : public Versioned_Object {
             return value_at_epoch(get_current_epoch());
         }
         
-        const T * val = current_trans->local_value<T>(this);
+        const T * val = current_trans->local_value<T>(this).first;
         
         if (val) return *val;
      

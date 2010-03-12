@@ -75,7 +75,7 @@ serialize(const PVOManagerVersion & obj,
     for (unsigned i = 0;  i < obj.size();  ++i)
         mem[i] = obj[i].offset;
 
-    return mem - 3;
+    mem -= 3;
 }
 
 void
@@ -186,10 +186,19 @@ PVOManager::
 setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
 {
     return Underlying::setup(old_epoch, new_epoch, new_value);
+
 #if 0
     // Get the new version table to set it up
     PVOManagerVersion & new_version
         = *reinterpret_cast<PVOManagerVersion *>(new_value);
+
+    for (unsigned i = 0;  i < new_version.size();  ++i) {
+        if (new_version[i].offset == PVOEntry::no
+        if (i >= old_version.size()) {
+            // new version; serialize it
+            bool serialized = ...;
+        }
+    }
     
     // Get the old version table to compare against
     const PVOManagerVersion & old_version
@@ -198,12 +207,6 @@ setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
     // Get the old and the new table so that we can tell which objects
     // have new values and need to be serialized
 
-    for (unsigned i = 0;  i < new_version.size();  ++i) {
-        if (i >= old_version.size()) {
-            // new version; serialize it
-            bool serialized = ...;
-        }
-    }
 
     // First, serialize all of the objects that are either new or have
     // changed value

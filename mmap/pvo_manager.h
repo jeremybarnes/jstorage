@@ -34,6 +34,11 @@ struct PVOEntry {
 
     static const uint64_t NO_OFFSET = (uint64_t)-1;
 
+#if 0
+    static const uint64_t NEW_OBJECT = (uint64_t)-2;
+    static const uint64_t DELETED_OBJECT = (uint64_t)-3;
+#endif
+
     PVOEntry()
         : offset(NO_OFFSET)
     {

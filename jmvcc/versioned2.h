@@ -53,7 +53,7 @@ struct Versioned2 : public Versioned_Object {
     T & mutate()
     {
         if (!current_trans) no_transaction_exception(this);
-        T * local = current_trans->local_value<T>(this);
+        T * local = current_trans->local_value<T>(this).first;
 
         if (!local) {
             T value;
@@ -80,7 +80,7 @@ struct Versioned2 : public Versioned_Object {
         if (!current_trans)
             throw Exception("reading outside a transaction");
 
-        const T * val = current_trans->local_value<T>(this);
+        const T * val = current_trans->local_value<T>(this).first;
         
         if (val) return *val;
         

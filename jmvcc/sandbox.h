@@ -50,11 +50,11 @@ public:
     // Return the local value for the given object.  Returns a null pointer
     // if there wasn't any.
     template<typename T>
-    T * local_value(Versioned_Object * obj)
+    std::pair<T *, bool> local_value(Versioned_Object * obj)
     {
         Local_Values::const_iterator it = local_values.find(obj);
-        if (it == local_values.end()) return 0;
-        return reinterpret_cast<T *>(it->second.val);
+        if (it == local_values.end()) return std::make_pair((T *)0, false);
+        return std::make_pair(reinterpret_cast<T *>(it->second.val), true);
     }
 
     // Return the local value for the given object, or create it if it
@@ -75,7 +75,7 @@ public:
     }
     
     template<typename T>
-    const T * local_value(const Versioned_Object * obj)
+    std::pair<const T *, bool> local_value(const Versioned_Object * obj)
     {
         return local_value<T>(const_cast<Versioned_Object *>(obj));
     }
