@@ -96,7 +96,7 @@ BOOST_AUTO_TEST_CASE( test_construct_in_trans1 )
         BOOST_CHECK_EQUAL(obj2, 1);
 
         BOOST_CHECK_EQUAL(store.object_count(), 2);
-
+        
         // Don't commit the transaction
     }
 

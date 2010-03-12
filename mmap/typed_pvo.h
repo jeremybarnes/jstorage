@@ -35,19 +35,41 @@ template<typename T>
 struct TypedPVO
     : public PVO, boost::noncopyable {
 
+    /** Local values
+
+        If ever an object's state has changed, whether that be its value,
+        or it is a new object, or the object has been deleted, we put
+        an entry in the sandbox.
+
+        For an object that already existed (and so wasn't created), the
+        local value pointer will simply point to the new value of the
+        object in this sandbox.
+
+        For an object that was created within the sandbox, the local value
+        pointer also points to the new value of the object.  The object is
+        created on commit.
+
+        For an object that already existed but was deleted, the local
+        value pointer will be a null pointer.
+    */
+
     // Client interface.  Just two methods to get at the current value.
     T & mutate()
     {
         if (!current_trans) no_transaction_exception(this);
-        T * local = current_trans->local_value<T>(this);
+        bool has_local;
+        T * local;
+        boost::tie(local, has_local) = current_trans->local_value<T>(this);
 
-        if (!local) {
+        if (!has_local) {
             const T * value = value_at_epoch(current_trans->epoch());
             local = current_trans->local_value<T>(this, *value);
             
             if (!local)
                 throw Exception("mutate(): no local was created");
         }
+        else if (!local)
+            throw Exception("attempt to access a removed object");
         
         return *local;
     }
@@ -71,9 +93,16 @@ struct TypedPVO
     {
         if (!current_trans) no_transaction_exception(this);
 
-        const T * val = current_trans->local_value<T>(this);
+        bool has_local;
+        const T * local;
+
+        boost::tie(local, has_local)
+            = current_trans->local_value<T>(this);
         
-        if (val) return *val;
+        if (has_local) {
+            if (local) return *local;
+            else throw Exception("attempt to access a removed object");
+        }
         
         const VT * d = vt();
 
@@ -84,7 +113,20 @@ struct TypedPVO
     void remove()
     {
         if (!current_trans) no_transaction_exception(this);
-        
+
+        void * old_local_value;
+        size_t old_size;
+        bool had_old_value;
+
+        boost::bind(old_local_value, old_size, had_old_value)
+            = current_trans->set_local_value(this, 0);
+        if (had_old_value) {
+            if (old_local_value == 0)
+                throw Exception("double remove() operation");
+            // TODO: exception safety
+            destroy_local_value(old_local_value);
+            current_trans->free_local_value(this, old_local_value, 0);
+        }
     }
     
     size_t history_size() const
@@ -184,13 +226,18 @@ protected:
         : PVO(owner), new_data(0)
     {
         version_table = VT::create(new T(val), 1);
+        mutate();
     }
     
-    /** Create it with the given ID and owner, but don't add it anywhere */
+    /** Create it with the given ID and owner, but don't add it anywhere.  This
+        constructor is mostly used to bootstrap.  If we are currently in a
+        transaction, it will be added to the sandbox however. */
     TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
         : PVO(id, owner), new_data(0)
     {
         version_table = VT::create(new T(val), 1);
+        if (current_trans)
+            mutate();
     }
     
     ~TypedPVO()

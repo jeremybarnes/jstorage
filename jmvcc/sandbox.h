@@ -14,6 +14,7 @@
 #include "versioned_object.h"
 #include <boost/tuple/tuple.hpp>
 
+
 namespace JMVCC {
 
 
@@ -27,6 +28,11 @@ namespace JMVCC {
 class Sandbox {
     struct Entry {
         Entry() : val(0), size(0)
+        {
+        }
+
+        Entry(void * val, size_t size)
+            : val(val), size(size)
         {
         }
 
@@ -85,6 +91,20 @@ public:
     {
         return local_value(const_cast<Versioned_Object *>(obj), initial_value);
     }
+
+    /** Set the local value for the given object.  Returns the previous
+        value and whether or not it existed.
+
+        If size is not zero, free(val) will eventually be called, so the
+        user must take care to make sure that this is the expected
+        behaviour.
+    */
+    boost::tuple<void *, size_t, bool>
+    set_local_value(Versioned_Object * obj, void * val, size_t size);
+
+    /** Free the local value, including making the versioned object do its
+        part of the deal. */
+    void free_local_value(Versioned_Object * obj, void * val, size_t size);
 
     /** Commits the current transaction.  Returns zero if the transaction
         failed, or returns the id of the new epoch if it succeeded. */

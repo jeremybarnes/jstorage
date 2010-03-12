@@ -76,6 +76,8 @@ serialize(const PVOManagerVersion & obj,
         mem[i] = obj[i].offset;
 
     mem -= 3;
+
+    return mem;
 }
 
 void
