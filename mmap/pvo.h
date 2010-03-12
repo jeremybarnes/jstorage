@@ -55,6 +55,8 @@ struct PVO : public JMVCC::Versioned_Object {
     /** How many versions of the object are there? */
     virtual size_t num_versions() const = 0;
 
+    virtual PVO * parent() const { return owner_; }
+
 protected:
     PVO(ObjectId id, PVOManager * owner)
         : id_(id), owner_(owner)

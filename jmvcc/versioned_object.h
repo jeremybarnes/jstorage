@@ -29,6 +29,9 @@ struct Versioned_Object {
     {
     }
 
+    // Return the parent object
+    virtual Versioned_Object * parent() const { return 0; }
+    
     // Check that the given commit is possible to perform.  Should perform the
     // check as quickly as possible; it doesn't matter if it returns a false
     // positive (but false negatives are verbotim).  Used to abort a commit

@@ -46,3 +46,8 @@ BOOST_AUTO_TEST_CASE( test_sandbox_calls_destructors )
 
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
+
+// Make sure that the destructors are called in the right order
+BOOST_AUTO_TEST_CASE( test_sandbox_destructor_order )
+{
+}
