@@ -101,16 +101,9 @@ class Sandbox {
             if (it != end())
                 return std::make_pair(&it->second, false);
 
-            using namespace std;
-            cerr << "inserting " << obj << " with " << size() << " values"
-                 << endl;
-
             Versioned_Object * parent = obj->parent();
             Entry * next_entry = 0;
             if (parent) next_entry = insert(parent).first;
-
-            cerr << "parent = " << parent << endl;
-            cerr << "next_entry = " << next_entry << endl;
 
             Versioned_Object * prev_obj = 0;
             if (next_entry) {
@@ -122,12 +115,8 @@ class Sandbox {
                 tail = obj;
             }
 
-            cerr << "prev_obj = " << prev_obj << endl;
-
             Entry * prev_entry = 0;
             if (prev_obj) prev_entry = &operator [] (prev_obj);
-
-            cerr << "prev_entry = " << prev_entry << endl;
 
             if (prev_entry)
                 prev_entry->next = obj;
@@ -257,6 +246,14 @@ public:
     const T * local_value(const Versioned_Object * obj, const T & initial_value)
     {
         return local_value(const_cast<Versioned_Object *>(obj), initial_value);
+    }
+
+    template<typename T>
+    void free_local_value(void * mem) const
+    {
+        T * typed = (T *)mem;
+        typed->~T();
+        free(mem);
     }
 
     /** Set the local value for the given object.  Returns the previous
