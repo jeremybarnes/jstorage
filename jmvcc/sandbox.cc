@@ -195,15 +195,6 @@ commit(Epoch old_epoch)
  
     // Commit everything
     for (it = local_values.begin(); result && it != end; ++it)
-        result = it->first->check(old_epoch, new_epoch, it->second.val);
- 
-    if (!result) {
-        clear();
-        return 0;
-    }
- 
-    // Commit everything
-    for (it = local_values.begin(); result && it != end; ++it)
         result = it->first->setup(old_epoch, new_epoch, it->second.val);
  
     if (result) {
