@@ -67,13 +67,10 @@ struct Sandbox::Setup_Commit {
 
     Epoch old_epoch, new_epoch;
 
-    vector<Versioned_Object *> objects_set_up;
-
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
         bool result = obj->setup(old_epoch, new_epoch, entry.val);
-        if (result) objects_set_up.push_back(obj);
         return result;
     }
 };
@@ -101,12 +98,10 @@ struct Sandbox::Rollback {
     }
     
     Epoch new_epoch;
-    vector<Versioned_Object *> objects_rolled_back;
-    
+
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
-        objects_rolled_back.push_back(obj);
         obj->rollback(new_epoch, entry.val);
         return true;
     }
@@ -132,9 +127,8 @@ commit(Epoch old_epoch)
 
 #if 1
     // Commit everything
-    Setup_Commit setup(old_epoch, new_epoch);
-    Rollback rollback(new_epoch);
-    failed_object = local_values.do_in_order(setup);
+    failed_object = local_values.do_in_order
+        (Setup_Commit(old_epoch, new_epoch));
 
     bool commit_succeeded = !failed_object;
 
@@ -161,13 +155,7 @@ commit(Epoch old_epoch)
     }
     else {
         // The setup failed.  We need to rollback everything that was setup.
-        local_values.do_in_order(rollback, 0, failed_object);
-
-        if (setup.objects_set_up != rollback.objects_rolled_back)
-            throw Exception("wrong objects rolled back");
-
-        if (setup.objects_set_up.size() != rollback.objects_rolled_back.size())
-            throw Exception("not all objects rolled back");
+        local_values.do_in_order(Rollback(new_epoch), 0, failed_object);
     }
 
 #else
