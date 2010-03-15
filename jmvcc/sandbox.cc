@@ -180,10 +180,15 @@ commit(Epoch old_epoch)
  
         // Make sure these writes are seen before we clean up
         memory_barrier();
- 
+
+#if 1
+        // Success: we are in a new epoch
+        local_values.do_in_order(Commit(new_epoch));
+#else
         // Success: we are in a new epoch
         for (it = local_values.begin(); it != end; ++it)
             it->first->commit(new_epoch);
+#endif
     }
     else {
         // Rollback any that were set up if there was a problem
