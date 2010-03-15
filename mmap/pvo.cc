@@ -31,6 +31,11 @@ store() const
     return owner_->store();
 }
 
-
+PVO *
+PVO::
+parent() const
+{
+    return owner_;
+}
 
 } // namespace JMVCC

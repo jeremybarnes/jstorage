@@ -57,6 +57,8 @@ public:
 
     virtual void set_persistent_version(ObjectId object, void * new_version);
 
+    virtual PVO * parent() const;
+
 private:
     class Itl;
     boost::scoped_ptr<Itl> itl;

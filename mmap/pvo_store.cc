@@ -143,4 +143,11 @@ set_persistent_version(ObjectId object, void * new_version)
     PVOManager::set_persistent_version(object, new_version);
 }
 
+PVO *
+PVOStore::
+parent() const
+{
+    return 0;
+}
+
 } // namespace JMVCC
