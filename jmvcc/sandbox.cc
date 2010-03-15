@@ -43,7 +43,6 @@ clear()
     local_values.clear();
 }
 
-#if 0
 struct Sandbox::Check_Values {
     Check_Values(Epoch old_epoch, Epoch new_epoch)
         : old_epoch(old_epoch), new_epoch(new_epoch)
@@ -127,6 +126,7 @@ commit(Epoch old_epoch)
 
     new_epoch = get_current_epoch() + 1;
 
+#if 0
     // Commit everything
     failed_object
         = local_values.do_in_order(Setup_Commit(old_epoch, new_epoch));
@@ -157,42 +157,11 @@ commit(Epoch old_epoch)
         local_values.do_in_order(Rollback(new_epoch), 0, failed_object);
     }
 
-    guard.release();
-
-    // TODO: for failed transactions, we'd do better to keep the
-    // structure to avoid reallocations
-    // TODO: clear as we go to better use cache
-    clear();
-        
-    return (result ? new_epoch : 0);
-}
-
 #else
 
-Epoch
-Sandbox::
-commit(Epoch old_epoch)
-{
-    Epoch new_epoch = get_current_epoch() + 1;
- 
-    bool result = true;
- 
     Local_Values::iterator
         it, end = local_values.end();
- 
-    // Check everything, before the lock is obtained
-    for (it = local_values.begin(); result && it != end; ++it)
-        result = it->first->check(old_epoch, new_epoch, it->second.val);
- 
-    if (!result) {
-        clear();
-        return 0;
-    }
- 
-    ACE_Guard<ACE_Mutex> guard(commit_lock);
- 
-    new_epoch = get_current_epoch() + 1;
- 
+
     // Commit everything
     for (it = local_values.begin(); result && it != end; ++it)
         result = it->first->setup(old_epoch, new_epoch, it->second.val);
@@ -222,9 +191,10 @@ commit(Epoch old_epoch)
              it != end; ++it)
             it->first->rollback(new_epoch, it->second.val);
     }
- 
+#endif
+
     guard.release();
- 
+
     // TODO: for failed transactions, we'd do better to keep the
     // structure to avoid reallocations
     // TODO: clear as we go to better use cache
@@ -232,8 +202,6 @@ commit(Epoch old_epoch)
         
     return (result ? new_epoch : 0);
 }
-
-#endif
 
 struct Sandbox::Dump_Value {
     Dump_Value(std::ostream & stream, const std::string & s)
