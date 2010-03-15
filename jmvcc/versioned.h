@@ -388,7 +388,6 @@ public:
 
     virtual void destroy_local_value(void * val) const
     {
-        if (!current_trans) no_transaction_exception(this);
         current_trans->free_local_value<T>(val);
     }
 
