@@ -153,15 +153,6 @@ class Sandbox {
             if (start != 0)
                 throw ML::Exception("not starting at start");
 
-            It it = self->begin();
-            for (It e = self->end();
-                 it != e && it->first != finish;  ++it) {
-                bool keep_going = dowhat(it->first, it->second);
-                if (!keep_going) return it->first;
-            }
-
-            return 0;
-
             if (start == 0) start = self->head;
 
             for (Versioned_Object * current = start;
