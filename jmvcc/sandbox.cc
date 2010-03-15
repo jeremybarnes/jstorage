@@ -67,10 +67,14 @@ struct Sandbox::Setup_Commit {
 
     Epoch old_epoch, new_epoch;
 
+    vector<Versioned_Object *> objects_set_up;
+
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
-        return obj->setup(old_epoch, new_epoch, entry.val);
+        bool result = obj->setup(old_epoch, new_epoch, entry.val);
+        if (result) objects_set_up.push_back(obj);
+        return result;
     }
 };
 
@@ -97,11 +101,13 @@ struct Sandbox::Rollback {
     }
     
     Epoch new_epoch;
+    vector<Versioned_Object *> objects_rolled_back;
     
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
-        obj->commit(new_epoch);
+        objects_rolled_back.push_back(obj);
+        obj->rollback(new_epoch, entry.val);
         return true;
     }
 };
@@ -111,8 +117,6 @@ Sandbox::
 commit(Epoch old_epoch)
 {
     Epoch new_epoch = get_current_epoch() + 1;
-
-    bool result = true;
 
     // Check everything, before the lock is obtained
     Versioned_Object * failed_object
@@ -126,12 +130,15 @@ commit(Epoch old_epoch)
 
     new_epoch = get_current_epoch() + 1;
 
-#if 0
+#if 1
     // Commit everything
-    failed_object
-        = local_values.do_in_order(Setup_Commit(old_epoch, new_epoch));
+    Setup_Commit setup(old_epoch, new_epoch);
+    Rollback rollback(new_epoch);
+    failed_object = local_values.do_in_order(setup);
 
-    if (!failed_object) {
+    bool commit_succeeded = !failed_object;
+
+    if (commit_succeeded) {
         // The setup succeeded.  This means that the commit is guaranteed to
         // succeed.
 
@@ -154,7 +161,13 @@ commit(Epoch old_epoch)
     }
     else {
         // The setup failed.  We need to rollback everything that was setup.
-        local_values.do_in_order(Rollback(new_epoch), 0, failed_object);
+        local_values.do_in_order(rollback, 0, failed_object);
+
+        if (setup.objects_set_up != rollback.objects_rolled_back)
+            throw Exception("wrong objects rolled back");
+
+        if (setup.objects_set_up.size() != rollback.objects_rolled_back.size())
+            throw Exception("not all objects rolled back");
     }
 
 #else
@@ -181,14 +194,8 @@ commit(Epoch old_epoch)
         // Make sure these writes are seen before we clean up
         memory_barrier();
 
-#if 1
         // Success: we are in a new epoch
         local_values.do_in_order(Commit(new_epoch));
-#else
-        // Success: we are in a new epoch
-        for (it = local_values.begin(); it != end; ++it)
-            it->first->commit(new_epoch);
-#endif
     }
     else {
         // Rollback any that were set up if there was a problem
@@ -204,8 +211,8 @@ commit(Epoch old_epoch)
     // structure to avoid reallocations
     // TODO: clear as we go to better use cache
     clear();
-        
-    return (result ? new_epoch : 0);
+    
+    return (commit_succeeded ? new_epoch : 0);
 }
 
 struct Sandbox::Dump_Value {
