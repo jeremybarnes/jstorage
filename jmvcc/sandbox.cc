@@ -43,6 +43,7 @@ clear()
     local_values.clear();
 }
 
+#if 0
 struct Sandbox::Check_Values {
     Check_Values(Epoch old_epoch, Epoch new_epoch)
         : old_epoch(old_epoch), new_epoch(new_epoch)
@@ -165,6 +166,83 @@ commit(Epoch old_epoch)
         
     return (result ? new_epoch : 0);
 }
+
+#else
+
+Epoch
+Sandbox::
+commit(Epoch old_epoch)
+{
+    Epoch new_epoch = get_current_epoch() + 1;
+ 
+    bool result = true;
+ 
+    Local_Values::iterator
+        it, end = local_values.end();
+ 
+    // Check everything, before the lock is obtained
+    for (it = local_values.begin(); result && it != end; ++it)
+        result = it->first->check(old_epoch, new_epoch, it->second.val);
+ 
+    if (!result) {
+        clear();
+        return 0;
+    }
+ 
+    ACE_Guard<ACE_Mutex> guard(commit_lock);
+ 
+    new_epoch = get_current_epoch() + 1;
+ 
+    // Commit everything
+    for (it = local_values.begin(); result && it != end; ++it)
+        result = it->first->check(old_epoch, new_epoch, it->second.val);
+ 
+    if (!result) {
+        clear();
+        return 0;
+    }
+ 
+    // Commit everything
+    for (it = local_values.begin(); result && it != end; ++it)
+        result = it->first->setup(old_epoch, new_epoch, it->second.val);
+ 
+    if (result) {
+        // First we update the epoch. This ensures that any new snapshot
+        // created will see the correct epoch value, and won't look at
+        // old values which might not have a list.
+        //
+        // IT IS REALLY IMPORTANT THAT THIS BE DONE IN THE GIVEN ORDER.
+        // If we were to update the epoch afterwards, then new transactions
+        // could be created with the old epoch. These transactions might
+        // need the values being cleaned up, racing with the creation
+        // process.
+        set_current_epoch(new_epoch);
+ 
+        // Make sure these writes are seen before we clean up
+        memory_barrier();
+ 
+        // Success: we are in a new epoch
+        for (it = local_values.begin(); it != end; ++it)
+            it->first->commit(new_epoch);
+    }
+    else {
+        // Rollback any that were set up if there was a problem
+        for (end = boost::prior(it), it = local_values.begin();
+             it != end; ++it)
+            it->first->rollback(new_epoch, it->second.val);
+    }
+ 
+    guard.release();
+ 
+    // TODO: for failed transactions, we'd do better to keep the
+    // structure to avoid reallocations
+    // TODO: clear as we go to better use cache
+    clear();
+        
+    return (result ? new_epoch : 0);
+}
+
+#endif
 
 struct Sandbox::Dump_Value {
     Dump_Value(std::ostream & stream, const std::string & s)

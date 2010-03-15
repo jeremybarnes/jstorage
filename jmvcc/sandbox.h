@@ -200,6 +200,11 @@ class Sandbox {
         using Local_Values_Base::size;
         using Local_Values_Base::find;
         using Local_Values_Base::end;
+
+        typedef Local_Values_Base::iterator iterator;
+        using Local_Values_Base::begin;
+
+
         void clear()
         {
             Local_Values_Base::clear();
