@@ -120,8 +120,9 @@ BOOST_AUTO_TEST_CASE( test_typedpvo_destroyed )
 
         {
             Local_Transaction trans;
+            BOOST_CHECK_EQUAL(constructed, destroyed);
             PVORef<Obj> tpvo = store.construct<Obj>(1);
-            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
         }
 
         BOOST_CHECK_EQUAL(constructed, destroyed);
@@ -129,9 +130,9 @@ BOOST_AUTO_TEST_CASE( test_typedpvo_destroyed )
         {
             Local_Transaction trans;
             PVORef<Obj> tpvo2 = store.construct<Obj>(2);
-            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
             trans.commit();
-            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
         }
         BOOST_CHECK_EQUAL(constructed, destroyed + 1);
     }    
@@ -157,11 +158,11 @@ BOOST_AUTO_TEST_CASE( test_rollback_objects_destroyed )
 
             PVORef<Obj> obj1 = store.construct<Obj>(0);
 
-            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
             
             PVORef<Obj> obj2 = store.construct<Obj>(1);
 
-            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 4);
             
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
@@ -206,14 +207,14 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
             
             obj1 = store.construct<Obj>(0);
 
-            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
 
             oid1 = obj1.id();
             BOOST_CHECK_EQUAL(oid1, 0);
             
             obj2 = store.construct<Obj>(1);
 
-            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 4);
             
             oid2 = obj2.id();
 
@@ -283,14 +284,14 @@ BOOST_AUTO_TEST_CASE( test_persistence )
             
             obj1 = store.construct<Obj>(14);
 
-            BOOST_CHECK_EQUAL(constructed, destroyed + 1);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
 
             oid1 = obj1.id();
             BOOST_CHECK_EQUAL(oid1, 0);
             
             obj2 = store.construct<Obj>(31);
 
-            BOOST_CHECK_EQUAL(constructed, destroyed + 2);
+            BOOST_CHECK_EQUAL(constructed, destroyed + 4);
             
             oid2 = obj2.id();
 

@@ -72,8 +72,10 @@ serialize(const PVOManagerVersion & obj,
 
     mem += 3;
 
-    for (unsigned i = 0;  i < obj.size();  ++i)
+    for (unsigned i = 0;  i < obj.size();  ++i) {
+        cerr << "  object " << i << " offset " << obj[i].offset << endl;
         mem[i] = obj[i].offset;
+    }
 
     mem -= 3;
 
@@ -116,8 +118,10 @@ reconstitute(PVOManagerVersion & obj,
     
     const uint64_t * data = md + 3;
 
-    for (unsigned i = 0;  i < size;  ++i)
+    for (unsigned i = 0;  i < size;  ++i) {
+        cerr << "object " << i << " offset " << data[i] << endl;
         obj[i].offset = data[i];
+    }
 }
 
 void
@@ -167,12 +171,14 @@ void
 PVOManager::
 set_persistent_version(ObjectId object, void * new_version)
 {
-    cerr << "set_persistent_version for " << object << endl;
+    cerr << "set_persistent_version for " << object << " to " << new_version
+         << endl;
 
     PVOManagerVersion & ver = mutate();
     if (object > ver.size())
         throw Exception("invalid object id");
     ver[object].offset = store()->to_offset(new_version);
+    cerr << "  offset is " << ver[object].offset << endl;
 }
 
 bool

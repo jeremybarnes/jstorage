@@ -31,6 +31,8 @@ namespace JMVCC {
     For more complicated cases (for example, where a lot of the state
     can be shared between an old and a new version), the object should
     derive directly from Versioned_Object instead.
+
+    TODO: allow it to have *no* versions.
 */
 
 template<typename T>

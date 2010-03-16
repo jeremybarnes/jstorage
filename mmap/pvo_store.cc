@@ -55,6 +55,8 @@ struct PVOStore::Itl {
 
     void bootstrap_open()
     {
+        cerr << "bootstrap_open: root_offset = " << *root_offset << endl;
+
         const void * mem = (const char *)mmap.get_address() + *root_offset;
 
         // Bootstrap the initial version into existence
