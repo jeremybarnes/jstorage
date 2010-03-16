@@ -70,7 +70,7 @@ struct With_Parent : public Versioned2<Obj> {
     }
 };
 
-BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
+BOOST_AUTO_TEST_CASE( test_sandbox_destructor_order )
 {
     With_Parent obj1(0, 0);
     With_Parent obj2(&obj1, 1);
@@ -78,7 +78,11 @@ BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
     {
         Sandbox sandbox;
         sandbox.local_value<Obj>(&obj1, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 1);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
         sandbox.local_value<Obj>(&obj2, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 2);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
     }
     
     BOOST_CHECK_EQUAL(obj1.destroy_order, 2);
@@ -87,7 +91,11 @@ BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
     {
         Sandbox sandbox;
         sandbox.local_value<Obj>(&obj2, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 2);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 1);
         sandbox.local_value<Obj>(&obj1, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 2);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
     }
     
     BOOST_CHECK_EQUAL(obj1.destroy_order, 4);
@@ -98,8 +106,14 @@ BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
     {
         Sandbox sandbox;
         sandbox.local_value<Obj>(&obj1, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 1);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
         sandbox.local_value<Obj>(&obj2, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 2);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
         sandbox.local_value<Obj>(&obj3, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 3);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
     }
     
     BOOST_CHECK_EQUAL(obj1.destroy_order, 7);
@@ -134,8 +148,14 @@ BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
     {
         Sandbox sandbox;
         sandbox.local_value<Obj>(&obj3, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 3);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 2);
         sandbox.local_value<Obj>(&obj2, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 3);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 1);
         sandbox.local_value<Obj>(&obj1, Obj());
+        BOOST_CHECK_EQUAL(sandbox.num_local_values(), 3);
+        BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
     }
 
     BOOST_CHECK_EQUAL(obj1.destroy_order, 3);
@@ -144,52 +164,68 @@ BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
 
 }
 
-#if 0
 // Make sure that the destructors are called in the right order
 BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
 {
+    int ntests = 10;
+    int nobj  = 200;
+    int nnoparent = 3;
+    //int niter = 10;
 
-    for (unsigned i = 0;  i < 100;  ++i) {
+    for (unsigned i = 0;  i < ntests;  ++i) {
 
         vector<boost::shared_ptr<With_Parent> > objects;
         
-        for (unsigned j = 0;  j < 100;  ++j) {
+        for (unsigned j = 0;  j < nobj;  ++j) {
             With_Parent * parent = 0;
-            if (j > 3)
+            if (j > nnoparent)
                 parent = objects[random() % objects.size()].get();
 
             objects.push_back(boost::shared_ptr<With_Parent>
                               (new With_Parent(parent, j)));
         }
 
-        counter = 0;
+        counter = 1;
 
-        // Create 100 local values
+        // Create local values for each
         {
             Sandbox sandbox;
 
-            for (unsigned j = 0;  j < 100;  ++j)
-                sandbox.local_value<Obj>(objects[j].get(), Obj());
+            for (unsigned j = 0;  j < nobj;  ++j) {
+                sandbox.local_value<Obj>(objects[j].get(), Obj(j));
+                BOOST_CHECK_EQUAL(sandbox.num_local_values(), j + 1);
+            }
+
+            BOOST_CHECK_EQUAL(sandbox.num_local_values(), nobj);
+            BOOST_CHECK_EQUAL(sandbox.num_automatic_local_values(), 0);
         }
 
         // Check that they were destroyed in the right order
-        for (unsigned j = 0;  j < 100;  ++j) {
-            BOOST_CHECK(objects[j]->destroy_order != 0);
-
+        for (unsigned j = 0;  j < nobj;  ++j) {
 #if 0
+            cerr << "object " << j << " parent ";
             if (objects[j]->parent())
-                BOOST_CHECK(objects[j]->parent()->destroy_order
-                                    > objects[j]->destroy_order);
+                cerr << objects[j]->parent()->index
+                     << " destroyed " << objects[j]->parent()->destroy_order;
+            else cerr << "(none)";
+            cerr << " destroy_order " << objects[j]->destroy_order << endl;
 #endif
 
             BOOST_CHECK(objects[j]->destroy_order != 0);
 
-            objects[j]->destroy_order = 0;
+            if (objects[j]->parent())
+                BOOST_CHECK(objects[j]->parent()->destroy_order
+                                    > objects[j]->destroy_order);
+            //else BOOST_CHECK(objects[j]->destroy_order >= nobj - nnoparent);
+
         }
+
+        for (unsigned j = 0;  j < nobj;  ++j)
+            objects[j]->destroy_order = 0;
 
 #if 0
         // Create a few local values
-        for (unsigned k = 0;  k < 10;  ++k) {
+        for (unsigned k = 0;  k < niter;  ++k) {
             set<int> done;
 
             {
@@ -205,5 +241,3 @@ BOOST_AUTO_TEST_CASE( stress_test_sandbox_destructor_order )
 
     }
 }
-
-#endif

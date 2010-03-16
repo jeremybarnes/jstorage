@@ -17,6 +17,115 @@ namespace JMVCC {
 
 
 /*****************************************************************************/
+/* SANDBOX::LOCAL_VALUES                                                     */
+/*****************************************************************************/
+
+std::pair<Sandbox::Entry *, bool>
+Sandbox::Local_Values::
+insert(Versioned_Object * obj)
+{
+    iterator it = find(obj);
+    if (it != end()) {
+        if (it->first != obj)
+            throw Exception("object pointed to wasn't correct object");
+        return std::make_pair(&it->second, false);
+    }
+
+    Versioned_Object * parent = obj->parent();
+    Entry * next_entry = 0;
+    if (parent) next_entry = insert(parent).first;
+
+    size_t size_before = size();
+
+    Versioned_Object * prev_obj = 0;
+    if (next_entry) {
+        prev_obj = next_entry->prev;
+        next_entry->prev = obj;
+    }
+    else {
+        prev_obj = tail;
+        tail = obj;
+    }
+
+    Entry * prev_entry = 0;
+    if (prev_obj) prev_entry = &operator [] (prev_obj);
+
+    if (prev_entry)
+        prev_entry->next = obj;
+    else head = obj;
+
+    Entry * entry = &operator [] (obj);
+
+    entry->next = parent;
+    entry->prev = prev_obj;
+
+    if (size() < size_before + 1)
+        throw Exception("logic error in insert: size didn't change");
+
+    return std::make_pair(entry, true);
+}
+
+template<class It, typename DoWhat, typename Self>
+Versioned_Object *
+Sandbox::Local_Values::
+do_in_order(Self * self,
+            DoWhat dowhat,
+            Versioned_Object * start,
+            Versioned_Object * finish)
+{
+    if (start != 0)
+        throw ML::Exception("not starting at start");
+
+    if (start == 0) start = self->head;
+
+#if 0
+    It it = self->begin();
+    for (It e = self->end();
+         it != e && it->first != finish;  ++it) {
+        bool keep_going = dowhat(it->first, it->second);
+        if (!keep_going) return it->first;
+    }
+
+    return 0;
+#endif
+
+    for (Versioned_Object * current = start;
+         current && current != finish;
+         /* no inc */) {
+        It it = self->find(current);
+        if (it == self->end())
+            throw ML::Exception("invalid iteration chain");
+        bool keep_going = dowhat(current, it->second);
+        if (!keep_going) return current;
+                
+        current = it->second.next;
+    }
+
+    return 0;
+}
+
+template<typename DoWhat>
+Versioned_Object *
+Sandbox::Local_Values::
+do_in_order(DoWhat dowhat,
+            Versioned_Object * start,
+            Versioned_Object * finish)
+{
+    return do_in_order<iterator>(this, dowhat, start, finish);
+}
+
+template<typename DoWhat>
+Versioned_Object *
+Sandbox::Local_Values::
+do_in_order(DoWhat dowhat,
+            Versioned_Object * start,
+            Versioned_Object * finish) const
+{
+    return do_in_order<const_iterator>(this, dowhat, start, finish);
+}
+
+
+/*****************************************************************************/
 /* SANDBOX                                                                   */
 /*****************************************************************************/
 
@@ -134,7 +243,7 @@ commit(Epoch old_epoch)
     if (commit_succeeded) {
         // The setup succeeded.  This means that the commit is guaranteed to
         // succeed.
-
+        
         // First we update the epoch.  This ensures that any new snapshot
         // created will see the correct epoch value, and won't look at
         // old values which might not have a list.
@@ -179,11 +288,13 @@ struct Sandbox::Dump_Value {
 
     bool operator () (const Versioned_Object * obj, const Entry & entry)
     {
-        if (entry.automatic) return true;
-
-        stream << s << "  " << i << " at " << obj << ": value "
-               << obj->print_local_value(entry.val)
-               << endl;
+        stream << s << "  " << i << " at " << obj;
+        if (entry.automatic)
+            cerr << " [AUTO] ";
+        else cerr << ": value "
+                  << obj->print_local_value(entry.val)
+                  << " parent " << obj->parent()
+                  << endl;
         
         ++i;
         return true;
@@ -215,6 +326,23 @@ set_local_value(Versioned_Object * obj, void * val)
     }
         
     return std::make_pair(old_value, !inserted.second);
+}
+
+size_t
+Sandbox::
+num_automatic_local_values() const
+{
+    size_t result = 0;
+
+    for (Local_Values::const_iterator
+             it = local_values.begin(),
+             end = local_values.end();
+         it != end;  ++it) {
+        if (it->second.automatic)
+            ++result;
+    }
+
+    return result;
 }
 
 std::ostream &
