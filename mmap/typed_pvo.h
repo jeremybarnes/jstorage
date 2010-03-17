@@ -206,11 +206,6 @@ private:
         return result;
     }
 
-    static void free_setup_data(void * setup_data)
-    {
-        Serializer<T>::deallocate(setup_data, *store());
-    }
-
 protected:
     // Needs to be able to call the destructor
     friend class PVOManager;
@@ -268,6 +263,11 @@ public:
                        void * new_value) const
     {
         return check_commit_possible(vt(), old_epoch, new_epoch);
+    }
+
+    void free_setup_data(void * setup_data)
+    {
+        Serializer<T>::deallocate(setup_data, *store());
     }
 
     virtual void * setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
@@ -372,7 +372,8 @@ public:
 
         void * setup_data = Serializer<T>::serialize(*nv, *store());
 
-        Call_Guard guard(boost::bind(&TypedPVO<T>::free_setup_data, setup_data));
+        Call_Guard guard(boost::bind(&TypedPVO<T>::free_setup_data, this,
+                                     setup_data));
 
         for (;;) {
             const VT * d = vt();
