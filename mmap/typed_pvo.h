@@ -391,7 +391,7 @@ public:
             if (set_version_table(d, new_version_table)) {
                 nv.release();  // no need to delete it now
                 guard.clear(); // no need to deallocate now
-                return new_version_table;
+                return setup_data;
             }
         }
     }

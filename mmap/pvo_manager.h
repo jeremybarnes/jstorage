@@ -131,6 +131,11 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
     
     static void * serialize(const PVOManagerVersion & obj,
                             MemoryManager & mm);
+
+    static void reserialize(const PVOManagerVersion & obj,
+                            void * where,
+                            MemoryManager & mm);
+
     static void deallocate(void * mem, MemoryManager & mm);
 
     static void reconstitute(PVOManagerVersion & obj,

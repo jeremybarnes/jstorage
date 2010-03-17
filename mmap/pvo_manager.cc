@@ -57,29 +57,49 @@ PVOManagerVersion::
 serialize(const PVOManagerVersion & obj,
           MemoryManager & mm)
 {
+    // TODO: exception safety
+
     size_t mem_needed = (obj.size() + 3) * 8;  // just a pointer each
-    uint64_t * mem
-        = (uint64_t *)mm.allocate_aligned(mem_needed, 8);
+    void * mem = mm.allocate_aligned(mem_needed, 8);
+
+    try {
+        reserialize(obj, mem, mm);
+    } catch (...) {
+        try {
+            mm.deallocate(mem, mem_needed);
+        }
+        catch (...) {
+        }
+
+        throw;
+    }
+
+    return mem;
+}
+
+void
+PVOManagerVersion::
+reserialize(const PVOManagerVersion & obj,
+            void * where,
+            MemoryManager & mm)
+{
+    uint64_t * mem = (uint64_t *)where;
 
     mem[0] = 0;  // version
     mem[1] = obj.size();  // size
     mem[2] = obj.object_count();  // size
-
+    
     cerr << "serialize" << endl;
     cerr << "mem = " << mem << endl;
     cerr << "obj.size() = " << obj.size() << " obj.object_count() = "
          << obj.object_count() << endl;
-
+    
     mem += 3;
 
     for (unsigned i = 0;  i < obj.size();  ++i) {
         cerr << "  object " << i << " offset " << obj[i].offset << endl;
         mem[i] = obj[i].offset;
     }
-
-    mem -= 3;
-
-    return mem;
 }
 
 void
@@ -200,6 +220,10 @@ void
 PVOManager::
 commit(Epoch new_epoch, void * setup_data) throw ()
 {
+    // Setup_Data points to where our new data is
+    // We need to record the actual values on this table
+    PVOManagerVersion::reserialize(read(), setup_data, *store());
+
     // Write the new table
     Underlying::commit(new_epoch, setup_data);
 }
