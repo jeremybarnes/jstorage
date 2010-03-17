@@ -279,7 +279,7 @@ public:
         return check_commit_possible(vt(), old_epoch, new_epoch);
     }
 
-    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
+    virtual void * setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
     {
         // Perform the commit assuming that it's going to go ahead.  We
         // have to:
@@ -402,12 +402,12 @@ public:
             if (set_version_table(d, new_version_table)) {
                 nv.release();  // no need to delete it now
                 guard.clear(); // no need to deallocate now
-                return true;
+                return new_version_table;
             }
         }
     }
 
-    virtual void commit(Epoch new_epoch) throw ()
+    virtual void commit(Epoch new_epoch, void * setup_data) throw ()
     {
         const VT * d = vt();
 
@@ -425,7 +425,8 @@ public:
         new_data = 0;
     }
 
-    virtual void rollback(Epoch new_epoch, void * local_data) throw ()
+    virtual void rollback(Epoch new_epoch, void * local_data,
+                          void * setup_data) throw ()
     {
         // The commit didn't happen.  We need to:
         // 1.  Free up the memory associated with the object that we just

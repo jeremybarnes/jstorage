@@ -229,9 +229,10 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
     /* Override these to deal with created or deleted objects. */
     virtual bool check(Epoch old_epoch, Epoch new_epoch,
                        void * new_value) const;
-    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * new_value);
-    virtual void commit(Epoch new_epoch) throw ();
-    virtual void rollback(Epoch new_epoch, void * local_data) throw ();
+    virtual void * setup(Epoch old_epoch, Epoch new_epoch, void * new_value);
+    virtual void commit(Epoch new_epoch, void * setup_data) throw ();
+    virtual void rollback(Epoch new_epoch, void * local_data,
+                          void * setup_data) throw ();
     
 
 private:

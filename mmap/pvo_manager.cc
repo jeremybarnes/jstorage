@@ -189,7 +189,7 @@ check(Epoch old_epoch, Epoch new_epoch,
     return Underlying::check(old_epoch, new_epoch, new_value);
 }
 
-bool
+void *
 PVOManager::
 setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
 {
@@ -198,23 +198,23 @@ setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
 
 void
 PVOManager::
-commit(Epoch new_epoch) throw ()
+commit(Epoch new_epoch, void * setup_data) throw ()
 {
     // Write the new table
-    Underlying::commit(new_epoch);
+    Underlying::commit(new_epoch, setup_data);
 
 }
 
 void
 PVOManager::
-rollback(Epoch new_epoch, void * local_data) throw ()
+rollback(Epoch new_epoch, void * local_data, void * setup_data) throw ()
 {
     // First, free all of the objects that had their value changed
     //rollback_new_values();
 
     // Now rollback the previous ones
 
-    return Underlying::rollback(new_epoch, local_data);
+    return Underlying::rollback(new_epoch, local_data, setup_data);
 }
 
 } // namespace JMVCC
