@@ -186,10 +186,6 @@ private:
     // The single internal version_table member.  Updated atomically.
     mutable VT * version_table;
 
-    // The location of the new data member when making a commit; pointer to
-    // disk
-    void * new_data;
-
     const VT * vt() const
     {
         return reinterpret_cast<const VT *>(version_table);
@@ -210,10 +206,9 @@ private:
         return result;
     }
 
-    void free_new_data()
+    static void free_setup_data(void * setup_data)
     {
-        Serializer<T>::deallocate(new_data, *store());
-        new_data = 0;
+        Serializer<T>::deallocate(setup_data, *store());
     }
 
 protected:
@@ -223,7 +218,7 @@ protected:
 
     /** Create it and add it to the current transaction. */
     TypedPVO(PVOManager * owner, const T & val = T())
-        : PVO(owner), new_data(0)
+        : PVO(owner)
     {
         version_table = VT::create(new T(val), 1);
         mutate();
@@ -233,7 +228,7 @@ protected:
         constructor is mostly used to bootstrap.  If we are currently in a
         transaction, it will be added to the sandbox however. */
     TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
-        : PVO(id, owner), new_data(0)
+        : PVO(id, owner)
     {
         version_table = VT::create(new T(val), 1);
         if (current_trans)
@@ -244,8 +239,6 @@ protected:
     {
         VT * d = const_cast< VT * > (vt());
         VT::free(d, PUBLISHED, EXCLUSIVE);
-        if (new_data)
-            throw Exception("new_data still present in destructor");
     }
 
     // Note that this can't be used if the object was ever published as it's
@@ -253,8 +246,6 @@ protected:
     void swap(TypedPVO & other)
     {
         std::swap(version_table, other.version_table);
-        if (new_data != other.new_data)
-            std::swap(new_data, other.new_data);
     }
         
 public:
@@ -320,7 +311,7 @@ public:
         // +------+ +------+ +-----+ +-----+ +-----+             |
         // Memory^                                               |
         //                           +-----+ +-----+             |
-        // Disk>                     |     | |     |<- new_data  |
+        // Disk>                     |     | |     |<- setup_data|
         //                           +-----+ +-----+             |
         //                              ^                        |
         //                              |                        |
@@ -379,12 +370,9 @@ public:
         // TODO: don't copy; steal
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
 
-        if (new_data)
-            throw Exception("setup() with new_data already set");
+        void * setup_data = Serializer<T>::serialize(*nv, *store());
 
-        new_data = Serializer<T>::serialize(*nv, *store());
-
-        Call_Guard guard(boost::bind(&TypedPVO<T>::free_new_data, this));
+        Call_Guard guard(boost::bind(&TypedPVO<T>::free_setup_data, setup_data));
 
         for (;;) {
             const VT * d = vt();
@@ -421,8 +409,7 @@ public:
         using namespace std;
         cerr << "set_persistent_version for object " << id() << " of type "
              << type_name<T>() << endl;
-        owner()->set_persistent_version(id(), new_data);
-        new_data = 0;
+        owner()->set_persistent_version(id(), setup_data);
     }
 
     virtual void rollback(Epoch new_epoch, void * local_data,
@@ -442,7 +429,7 @@ public:
             if (set_version_table(d, d2)) return;
         }
 
-        free_new_data();
+        free_setup_data(setup_data);
     }
 
     virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch)

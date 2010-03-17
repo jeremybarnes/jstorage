@@ -202,7 +202,6 @@ commit(Epoch new_epoch, void * setup_data) throw ()
 {
     // Write the new table
     Underlying::commit(new_epoch, setup_data);
-
 }
 
 void
