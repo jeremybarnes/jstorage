@@ -169,49 +169,60 @@ struct Sandbox::Check_Values {
 };
 
 struct Sandbox::Setup_Commit {
-    Setup_Commit(Epoch old_epoch, Epoch new_epoch)
-        : old_epoch(old_epoch), new_epoch(new_epoch)
+    Setup_Commit(Epoch old_epoch, Epoch new_epoch,
+                 vector<void *> & commit_data)
+        : old_epoch(old_epoch), new_epoch(new_epoch), commit_data(commit_data)
     {
     }
 
     Epoch old_epoch, new_epoch;
+    vector<void *> & commit_data;
 
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
-        bool result = obj->setup(old_epoch, new_epoch, entry.val);
+        void * result = obj->setup(old_epoch, new_epoch, entry.val);
+        if (result) commit_data.push_back(result);
         return result;
     }
 };
 
 struct Sandbox::Commit {
-    Commit(Epoch new_epoch)
-        : new_epoch(new_epoch)
+    Commit(Epoch new_epoch, vector<void *> & commit_data)
+        : new_epoch(new_epoch), commit_data(commit_data), index(0)
     {
     }
 
     Epoch new_epoch;
+    vector<void *> & commit_data;
+    int index;
 
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
-        obj->commit(new_epoch);
+        if (index >= commit_data.size())
+            throw Exception("Sandbox::Commit: indexes out of range");
+        obj->commit(new_epoch, commit_data[index++]);
         return true;
     }
 };
 
 struct Sandbox::Rollback {
-    Rollback(Epoch new_epoch)
-        : new_epoch(new_epoch)
+    Rollback(Epoch new_epoch, vector<void *> & commit_data)
+        : new_epoch(new_epoch), commit_data(commit_data), index(0)
     {
     }
     
     Epoch new_epoch;
+    vector<void *> & commit_data;
+    int index;
 
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
-        obj->rollback(new_epoch, entry.val);
+        if (index >= commit_data.size())
+            throw Exception("Sandbox::Commit: indexes out of range");
+        obj->rollback(new_epoch, entry.val, commit_data[index++]);
         return true;
     }
 };
@@ -235,8 +246,13 @@ commit(Epoch old_epoch)
     new_epoch = get_current_epoch() + 1;
 
     // Commit everything
-    failed_object = local_values.do_in_order
-        (Setup_Commit(old_epoch, new_epoch));
+
+    vector<void *> commit_data;
+    commit_data.reserve(local_values.size());
+
+    Setup_Commit setup_commit(old_epoch, new_epoch, commit_data);
+    
+    failed_object = local_values.do_in_order(setup_commit);
 
     bool commit_succeeded = !failed_object;
 
@@ -259,15 +275,17 @@ commit(Epoch old_epoch)
         memory_barrier();
 
         // Success: we are in a new epoch
-        local_values.do_in_order(Commit(new_epoch));
+        Commit commit(new_epoch, commit_data);
+        local_values.do_in_order(commit);
     }
     else {
         // The setup failed.  We need to rollback everything that was setup.
-        local_values.do_in_order(Rollback(new_epoch), 0, failed_object);
+        Rollback rollback(new_epoch, commit_data);
+        local_values.do_in_order(rollback, 0, failed_object);
     }
-
+    
     guard.release();
-
+    
     // TODO: for failed transactions, we'd do better to keep the
     // structure to avoid reallocations
     // TODO: clear as we go to better use cache

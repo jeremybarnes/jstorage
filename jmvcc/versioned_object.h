@@ -40,14 +40,18 @@ struct Versioned_Object {
     virtual bool check(Epoch old_epoch, Epoch new_epoch, void * data) const = 0;
 
     // Get the commit ready and check that everything can go ahead, but
-    // don't actually perform the commit
-    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * data) = 0;
+    // don't actually perform the commit.  Returns an opaque pointer that
+    // can be used to provide information to commit() and rollback().  If the
+    // setup fails, the pointer must be null, otherwise it must not be null.
+    virtual void * setup(Epoch old_epoch, Epoch new_epoch,
+                         void * local_data) = 0;
 
     // Confirm a setup commit, making it permanent
-    virtual void commit(Epoch new_epoch) throw () = 0;
+    virtual void commit(Epoch new_epoch, void * setup_data) throw () = 0;
 
     // Roll back a setup commit
-    virtual void rollback(Epoch new_epoch, void * data) throw () = 0;
+    virtual void rollback(Epoch new_epoch, void * local_data,
+                          void * setup_data) throw () = 0;
 
     // Clean up an unused version
     virtual void cleanup(Epoch unused_valid_from, Epoch trigger_epoch) = 0;

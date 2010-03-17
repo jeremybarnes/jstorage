@@ -201,7 +201,7 @@ public:
         return true;
     }
 
-    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * data)
+    virtual void * setup(Epoch old_epoch, Epoch new_epoch, void * data)
     {
         ACE_Guard<Mutex> guard(lock);
 
@@ -209,7 +209,7 @@ public:
             throw Exception("epochs out of order");
 
         if (valid_from() > old_epoch)
-            return false;  // something updated before us
+            return 0;  // something updated before us
 
         // We have to allocate the extra space in the history as nothing is
         // allowed to fail in the commit or rollback.  We won't read from this
@@ -219,10 +219,10 @@ public:
         Entry entry = new_entry(0, *reinterpret_cast<T *>(data));
         current = entry.value;
 
-        return true;
+        return this;
     }
 
-    virtual void commit(Epoch new_epoch) throw ()
+    virtual void commit(Epoch new_epoch, void * setup_data) throw ()
     {
         // Now that it's definitive, we perform the following:
         // 1.  We cleanup the first value on the history list
@@ -233,7 +233,7 @@ public:
         snapshot_info.register_cleanup(this, valid_from);
     }
 
-    Epoch fake_commit(Epoch new_epoch) throw ()
+    Epoch fake_commit(Epoch new_epoch, void * setup_data) throw ()
     {
         // Now that it's definitive, we perform the following:
         // 1.  We cleanup the first value on the history list
@@ -244,7 +244,8 @@ public:
         return valid_from;
     }
 
-    virtual void rollback(Epoch new_epoch, void * data) throw ()
+    virtual void rollback(Epoch new_epoch, void * local_data,
+                          void * setup_data) throw ()
     {
         // Reverse the setup
         ACE_Guard<Mutex> guard(lock);

@@ -143,7 +143,7 @@ public:
         return true;
     }
 
-    virtual bool setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
+    virtual void * setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
     {
         for (;;) {
             const VT * d = vt();
@@ -163,11 +163,12 @@ public:
             new_version_table->push_back(1 /* valid_to */,
                                       *reinterpret_cast<T *>(new_value));
             
-            if (set_version_table(d, new_version_table)) return true;
+            if (set_version_table(d, new_version_table))
+                return new_version_table;
         }
     }
 
-    virtual void commit(Epoch new_epoch) throw ()
+    virtual void commit(Epoch new_epoch, void * setup_data) throw ()
     {
         const VT * d = vt();
 
@@ -179,7 +180,8 @@ public:
         snapshot_info.register_cleanup(this, valid_from);
     }
 
-    virtual void rollback(Epoch new_epoch, void * local_data) throw ()
+    virtual void rollback(Epoch new_epoch, void * local_data,
+                          void * setup_data) throw ()
     {
         const VT * d = vt();
 
