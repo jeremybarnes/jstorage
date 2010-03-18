@@ -20,4 +20,9 @@ void * to_pointer(PVOStore * store, size_t offset)
     return store->to_pointer(offset);
 }
 
+void mutate_owner(PVOManager * owner)
+{
+    owner->mutate();
+}
+
 } // namespace JMVCC

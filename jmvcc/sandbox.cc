@@ -180,8 +180,15 @@ struct Sandbox::Setup_Commit {
 
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
-        if (entry.automatic) return true;
+        if (entry.automatic) {
+            return true;
+        }
         void * result = obj->setup(old_epoch, new_epoch, entry.val);
+
+        cerr << "setup_commit for " << obj << " " << type_name(*obj)
+             << " with local value " << entry.val << " returned "
+             << result << endl;
+
         if (result) commit_data.push_back(result);
         return result;
     }
@@ -200,6 +207,11 @@ struct Sandbox::Commit {
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
+
+        cerr << "committing: obj " << obj << " " << type_name(*obj)
+             << " index = " << index << " commit_data.size() = "
+             << commit_data.size() << endl;
+
         if (index >= commit_data.size())
             throw Exception("Sandbox::Commit: indexes out of range");
         obj->commit(new_epoch, commit_data[index++]);
@@ -233,7 +245,7 @@ commit(Epoch old_epoch)
 {
     Epoch new_epoch = get_current_epoch() + 1;
 
-    // Check everything, before the lock is obtained
+    // Check that everything is commitable, before the lock is obtained
     Versioned_Object * failed_object
         = local_values.do_in_order(Check_Values(old_epoch, new_epoch));
     if (failed_object) {
@@ -241,6 +253,7 @@ commit(Epoch old_epoch)
         return 0;
     }
 
+    // Get the lock.  Now only we can commit.
     ACE_Guard<ACE_Mutex> guard(commit_lock);
 
     new_epoch = get_current_epoch() + 1;
@@ -250,9 +263,21 @@ commit(Epoch old_epoch)
     vector<void *> commit_data;
     commit_data.reserve(local_values.size());
 
+    cerr << "-------------- before setup" << endl;
+    dump(cerr);
+    cerr << "--------------" << endl << endl;
+
     Setup_Commit setup_commit(old_epoch, new_epoch, commit_data);
-    
     failed_object = local_values.do_in_order(setup_commit);
+
+    cerr << "setup_commit done: commit_data.size() = "
+         << commit_data.size() << " failed_object = " << failed_object
+         << endl;
+
+    cerr << "-------------- after setup" << endl;
+    dump(cerr);
+    cerr << "--------------" << endl << endl;
+
 
     bool commit_succeeded = !failed_object;
 

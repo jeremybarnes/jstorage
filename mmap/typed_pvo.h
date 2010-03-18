@@ -19,6 +19,7 @@ namespace JMVCC {
 
 PVOStore * to_store(PVOManager * owner);
 void * to_pointer(PVOStore * store, size_t offset);
+void mutate_owner(PVOManager * owner);
 
 
 /*****************************************************************************/
@@ -58,22 +59,12 @@ struct TypedPVO
     {
         if (!current_trans) no_transaction_exception(this);
 
-        using namespace std;
-        cerr << "before mutate: " << endl;
-        current_trans->Sandbox::dump(cerr);
-        cerr << endl;
-
         bool has_local;
         T * local;
         boost::tie(local, has_local) = current_trans->local_value<T>(this);
 
-        cerr << "has_local = " << has_local << " local = "
-             << local << endl;
-
         if (!has_local) {
             const T * value = value_at_epoch(current_trans->epoch());
-
-            cerr << "value = " << value << endl;
 
             local = current_trans->local_value<T>(this, *value);
             
@@ -83,11 +74,6 @@ struct TypedPVO
         else if (!local)
             throw Exception("attempt to access a removed object");
 
-        using namespace std;
-        cerr << "after mutate: local = " << local << endl;
-        current_trans->Sandbox::dump(cerr);
-        cerr << endl;
-        
         return *local;
     }
 
@@ -384,8 +370,20 @@ public:
         //
         // Again the free is deferred
 
-        // TODO: don't copy; steal
+        // NOTE: setup has another job: to make sure that if the parent ovbject
+        // needs to be modified, that it will have a local value and will
+        // therefore be ready to commit.
+
+        // TODO: don't copy; steal, since the pointer will be destroyed no
+        // matter what.
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
+
+        PVOManager * owner = this->owner();
+        if (owner && (void *)owner != (void *)this) {
+            // A commit of this object will require the owner to be committed
+            // as well.  Here we make sure that this happens.
+            mutate_owner(owner);
+        }
 
         void * setup_data = Serializer<T>::serialize(*nv, *store());
 
