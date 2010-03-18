@@ -141,12 +141,14 @@ set_persistent_version(ObjectId object, void * new_version)
 {
     if (object == ROOT_OBJECT_ID) {
         cerr << "setting version for ROOT_OBJECT_ID" << endl;
+        size_t old_offset = *itl->root_offset;
+        void * result = to_pointer(old_offset);
         size_t new_offset
             = (const char *)new_version - (const char *)itl->mmap.get_address();
         cerr << "old_offset = " << *itl->root_offset << endl;
         cerr << "new_offset = " << new_offset << endl;
         *itl->root_offset = new_offset;
-        return 0;
+        return result;
     }
 
     return PVOManager::set_persistent_version(object, new_version);
