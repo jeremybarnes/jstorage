@@ -128,6 +128,13 @@ deallocate(void * ptr, size_t bytes)
     return itl->mmap.deallocate(ptr);
 }
 
+uint64_t
+PVOStore::
+get_free_memory() const
+{
+    return itl->mmap.get_free_memory();
+}
+
 void
 PVOStore::
 set_persistent_version(ObjectId object, void * new_version)

@@ -272,9 +272,13 @@ BOOST_AUTO_TEST_CASE( test_persistence )
 
     ObjectId oid1, oid2;
 
+    size_t free_memory_before = 0, free_memory_after = 0;
+
     {
         // The region for persistent objects, as anonymous mapped memory
         PVOStore store(create_only, fname, 65536);
+
+        free_memory_before = store.get_free_memory();
 
         PVORef<Obj> obj1, obj2;
 
@@ -301,8 +305,14 @@ BOOST_AUTO_TEST_CASE( test_persistence )
             BOOST_CHECK_EQUAL(obj2.read(), 31);
             
             BOOST_CHECK_EQUAL(store.object_count(), 2);
+
+            BOOST_CHECK_EQUAL(free_memory_before, store.get_free_memory());
             
             BOOST_REQUIRE(trans.commit());
+
+            BOOST_CHECK(free_memory_before > store.get_free_memory());
+
+            free_memory_after = store.get_free_memory();
         }
         
         BOOST_CHECK_EQUAL(constructed, destroyed + 2);
@@ -315,6 +325,32 @@ BOOST_AUTO_TEST_CASE( test_persistence )
         // The region for persistent objects, as anonymous mapped memory
         PVOStore store(open_only, fname);
 
+        BOOST_CHECK_EQUAL(free_memory_after, store.get_free_memory());
+
+        {
+            Local_Transaction trans;
+
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+            
+            PVORef<Obj> obj1 = store.lookup<Obj>(oid1);
+            PVORef<Obj> obj2 = store.lookup<Obj>(oid2);
+
+            BOOST_CHECK_EQUAL(obj1.read(), 14);
+            BOOST_CHECK_EQUAL(obj2.read(), 31);
+
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+        }
+
+        BOOST_CHECK_EQUAL(free_memory_after, store.get_free_memory());
+    }
+
+    
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    {
+        // The region for persistent objects, as anonymous mapped memory
+        PVOStore store(open_only, fname);
+
         {
             Local_Transaction trans;
 
@@ -322,27 +358,214 @@ BOOST_AUTO_TEST_CASE( test_persistence )
             
             trans.Sandbox::dump(cerr);
 
-            cerr << "getting objects" << endl;
             PVORef<Obj> obj1 = store.lookup<Obj>(oid1);
-
-            trans.Sandbox::dump(cerr);
-
-            cerr << "got obj1" << endl;
             PVORef<Obj> obj2 = store.lookup<Obj>(oid2);
-            cerr << "got obj2" << endl;
-
-            trans.Sandbox::dump(cerr);
 
             BOOST_CHECK_EQUAL(obj1.read(), 14);
             BOOST_CHECK_EQUAL(obj2.read(), 31);
 
-            // Make sure the objects didn't get committed
+            obj1.mutate() = 23;
+            obj2.mutate() = 45;
+
             BOOST_CHECK_EQUAL(store.object_count(), 2);
+
+            BOOST_CHECK_EQUAL(free_memory_after, store.get_free_memory());
+
+            trans.commit();
+
+            // Give the memory time to be reclaimed
         }
+
+        BOOST_CHECK_EQUAL(free_memory_after - store.get_free_memory(), 0);
+    }
+    
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+
+    {
+        // The region for persistent objects, as anonymous mapped memory
+        PVOStore store(open_only, fname);
+
+        {
+            Local_Transaction trans;
+
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+            
+            trans.Sandbox::dump(cerr);
+
+            PVORef<Obj> obj1 = store.lookup<Obj>(oid1);
+            PVORef<Obj> obj2 = store.lookup<Obj>(oid2);
+
+            BOOST_CHECK_EQUAL(obj1.read(), 23);
+            BOOST_CHECK_EQUAL(obj2.read(), 45);
+
+            BOOST_CHECK_EQUAL(store.object_count(), 0);
+
+            obj1.remove();
+            obj2.remove();
+
+            BOOST_CHECK_EQUAL(store.object_count(), 0);
+            
+            BOOST_CHECK_THROW(obj1.read(), ML::Exception);
+            BOOST_CHECK_THROW(obj2.read(), ML::Exception);
+
+            BOOST_CHECK_EQUAL(free_memory_after, store.get_free_memory());
+
+            trans.commit();
+
+            // Give the memory time to be reclaimed
+        }
+
+        BOOST_CHECK_EQUAL(free_memory_before, store.get_free_memory());
     }
     
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
+
+size_t counter = 1;
+
+struct With_Parent : public Versioned2<Obj> {
+    With_Parent(With_Parent * parent, int index)
+        : parent_(parent), index(index), destroy_order(0)
+    {
+    }
+
+    With_Parent * parent_;
+    int index;
+    mutable size_t destroy_order;
+
+    virtual With_Parent * parent() const { return parent_; }
+
+    virtual void destroy_local_value(void * val) const
+    {
+        destroy_order = counter++;
+        Versioned2<Obj>::destroy_local_value(val);
+    }
+};
+
+
+
+#if 0
+template<class Var>
+struct Object_Test_Thread2 {
+    typedef typename Var::value_type Val;
+
+    Var * vars;
+    int nvars;
+    int iter;
+    boost::barrier & barrier;
+    size_t & failures;
+
+    Object_Test_Thread2(Var * vars,
+                        int nvars,
+                        int iter, boost::barrier & barrier,
+                        size_t & failures)
+        : vars(vars), nvars(nvars), iter(iter), barrier(barrier),
+          failures(failures)
+    {
+    }
+    
+    void operator () ()
+    {
+        // Wait for all threads to start up before we continue
+        barrier.wait();
+        
+        int errors = 0;
+        int local_failures = 0;
+        
+        for (unsigned i = 0;  i < iter;  ++i) {
+            // Keep going until we succeed
+            int var1 = random() % nvars, var2 = random() % nvars;
+            
+            bool succeeded = false;
+
+            while (!succeeded) {
+                Local_Transaction trans;
+                
+                // Now that we're inside, the total should be zero
+                ssize_t total = 0;
+
+                for (unsigned i = 0;  i < nvars;  ++i)
+                    total += vars[i].read();
+
+                if (total != 0) {
+                    ACE_Guard<ACE_Mutex> guard(commit_lock);
+                    cerr << "--------------- total not zero" << endl;
+                    snapshot_info.dump();
+                    cerr << "total is " << total << endl;
+                    cerr << "trans.epoch() = " << trans.epoch() << endl;
+                    ++errors;
+                    for (unsigned i = 0;  i < nvars;  ++i)
+                        vars[i].dump();
+                    cerr << "--------------- end total not zero" << endl;
+                }
+
+                Val & val1 = vars[var1].mutate();
+                Val & val2 = vars[var2].mutate();
+                    
+                val1 -= 1;
+                val2 += 1;
+                
+                succeeded = trans.commit();
+                local_failures += !succeeded;
+            }
+        }
+
+        static Lock lock;
+        Guard guard(lock);
+        
+        BOOST_CHECK_EQUAL(errors, 0);
+        
+        failures += local_failures;
+    }
+};
+
+template<class Var>
+void run_object_test2(int nthreads, int niter, int nvals)
+{
+    cerr << endl << "testing 2 with " << nthreads << " threads and "
+         << niter << " iter"
+         << " class " << demangle(typeid(Var).name()) << endl;
+
+    constructed = destroyed = 0;
+
+    {
+        Var vals[nvals];
+        boost::barrier barrier(nthreads);
+        boost::thread_group tg;
+        
+        size_t failures = 0;
+        
+        Timer timer;
+        for (unsigned i = 0;  i < nthreads;  ++i)
+            tg.create_thread(Object_Test_Thread2<Var>(vals, nvals, niter,
+                                                      barrier, failures));
+        
+        tg.join_all();
+        
+        cerr << "elapsed: " << timer.elapsed() << endl;
+        
+        ssize_t total = 0;
+        {
+            Local_Transaction trans;
+            for (unsigned i = 0;  i < nvals;  ++i)
+                total += vals[i].read();
+        }
+        
+        BOOST_CHECK_EQUAL(snapshot_info.entry_count(), 0);
+        
+        BOOST_CHECK_EQUAL(total, 0);
+        for (unsigned i = 0;  i < nvals;  ++i) {
+            //cerr << "current_epoch = " << get_current_epoch() << endl;
+            if (vals[i].history_size() != 0)
+                vals[i].dump();
+            BOOST_CHECK_EQUAL(vals[i].history_size(), 0);
+        }
+    }
+
+    BOOST_CHECK_EQUAL(constructed, destroyed);
+}
+#endif
+
 
 #if 0
 {

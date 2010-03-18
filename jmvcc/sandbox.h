@@ -181,25 +181,10 @@ public:
         boost::tie(entry, inserted)
             = local_values.insert(obj);
 
-        using namespace std;
-        cerr << "local_value insert: inserted = " << inserted << " entry = "
-             << entry << " entry->automatic = " << entry->automatic
-             << endl;
-        cerr << "dump(): " << endl;
-        dump(cerr);
-        cerr << endl;
-        
         if (inserted || entry->automatic) {
             entry->val = malloc(sizeof(T));
             new (entry->val) T(initial_value);
             entry->automatic = false;
-
-            cerr << "after setup" << endl;
-            cerr << "dump(): " << endl;
-            dump(cerr);
-            cerr << endl;
-
-            cerr << "entry->val = " << entry->val << endl;
         }
 
         return reinterpret_cast<T *>(entry->val);

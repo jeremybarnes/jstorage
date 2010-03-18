@@ -8,7 +8,7 @@ MMAP_SOURCES := \
 	pvo.cc \
 	typed_pvo.cc
 
-MMAP_LINK :=
+MMAP_LINK := jmvcc
 
 $(eval $(call library,mmap,$(MMAP_SOURCES),$(MMAP_LINK)))
 

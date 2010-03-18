@@ -131,18 +131,18 @@ struct TypedPVO
     {
         if (!current_trans) no_transaction_exception(this);
 
-        void * old_local_value;
-        size_t old_size;
-        bool had_old_value;
-
-        boost::bind(old_local_value, old_size, had_old_value)
+        std::pair<void *, bool> values
             = current_trans->set_local_value(this, 0);
+
+        void * old_local_value = values.first;
+        bool had_old_value = values.second;
+
         if (had_old_value) {
             if (old_local_value == 0)
                 throw Exception("double remove() operation");
             // TODO: exception safety
             destroy_local_value(old_local_value);
-            current_trans->free_local_value(this, old_local_value, 0);
+            current_trans->free_local_value<T>(old_local_value);
         }
     }
     

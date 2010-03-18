@@ -114,6 +114,10 @@ struct PVORef {
     operator const Obj () const { return pvo->read(); }
 
     const Obj & read() const { return pvo->read(); }
+
+    Obj & mutate() const { return pvo->mutate(); }
+
+    void remove() const { pvo->remove(); }
 };
 
 
