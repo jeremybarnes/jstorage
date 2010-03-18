@@ -135,7 +135,7 @@ get_free_memory() const
     return itl->mmap.get_free_memory();
 }
 
-void
+void *
 PVOStore::
 set_persistent_version(ObjectId object, void * new_version)
 {
@@ -146,10 +146,10 @@ set_persistent_version(ObjectId object, void * new_version)
         cerr << "old_offset = " << *itl->root_offset << endl;
         cerr << "new_offset = " << new_offset << endl;
         *itl->root_offset = new_offset;
-        return;
+        return 0;
     }
 
-    PVOManager::set_persistent_version(object, new_version);
+    return PVOManager::set_persistent_version(object, new_version);
 }
 
 PVO *

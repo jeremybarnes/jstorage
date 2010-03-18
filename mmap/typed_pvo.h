@@ -425,7 +425,12 @@ public:
         using namespace std;
         cerr << "set_persistent_version for object " << id() << " of type "
              << type_name<T>() << endl;
-        owner()->set_persistent_version(id(), setup_data);
+        void * old_mem = owner()->set_persistent_version(id(), setup_data);
+        
+        // Deallocate the memory.  TODO: should we wait for the end of the
+        // critical section?
+        if (old_mem)
+            Serializer<T>::deallocate(old_mem, *store());
     }
 
     virtual void rollback(Epoch new_epoch, void * local_data,

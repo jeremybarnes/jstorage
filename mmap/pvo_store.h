@@ -57,7 +57,7 @@ public:
 
     virtual uint64_t get_free_memory() const;
 
-    virtual void set_persistent_version(ObjectId object, void * new_version);
+    virtual void * set_persistent_version(ObjectId object, void * new_version);
 
     virtual PVO * parent() const;
 

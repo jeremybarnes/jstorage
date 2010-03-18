@@ -188,7 +188,7 @@ object_count() const
     return read().object_count();
 }
 
-void
+void *
 PVOManager::
 set_persistent_version(ObjectId object, void * new_version)
 {
@@ -198,8 +198,16 @@ set_persistent_version(ObjectId object, void * new_version)
     PVOManagerVersion & ver = mutate();
     if (object > ver.size())
         throw Exception("invalid object id");
+
+    size_t old_offset = ver[object].offset;
+    cerr << "  old offset is " << old_offset << endl;
     ver[object].offset = store()->to_offset(new_version);
-    cerr << "  offset is " << ver[object].offset << endl;
+    cerr << "  new offset is " << ver[object].offset << endl;
+
+    void * result = (old_offset == PVOEntry::NO_OFFSET
+                     ? 0: store()->to_pointer(old_offset));
+    
+    return result;
 }
 
 bool

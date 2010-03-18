@@ -229,8 +229,11 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     /** Set a new persistent version for an object.  This will record that
         there is a new persistent version on disk for the given object, so
-        the pointer should be swapped and the current one cleaned up. */
-    virtual void set_persistent_version(ObjectId object, void * new_version);
+        the pointer should be swapped and the current one cleaned up.
+    
+        Returns the old pointer to allow it to be cleaned up.
+    */
+    virtual void * set_persistent_version(ObjectId object, void * new_version);
 
     /* Override these to deal with created or deleted objects. */
     virtual bool check(Epoch old_epoch, Epoch new_epoch,
