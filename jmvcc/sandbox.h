@@ -212,10 +212,6 @@ public:
 
     /** Set the local value for the given object.  Returns the previous
         value and whether or not it existed.
-
-        If size is not zero, free(val) will eventually be called, so the
-        user must take care to make sure that this is the expected
-        behaviour.
     */
     std::pair<void *, bool>
     set_local_value(Versioned_Object * obj, void * val);

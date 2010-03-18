@@ -130,6 +130,8 @@ struct TypedPVO
             destroy_local_value(old_local_value);
             current_trans->free_local_value<T>(old_local_value);
         }
+        
+        owner()->remove(id(), true /* explicitly */);
     }
     
     size_t history_size() const
@@ -374,6 +376,11 @@ public:
         // needs to be modified, that it will have a local value and will
         // therefore be ready to commit.
 
+        if (new_value == 0) {
+            // This object was removed.  Nothing to do.
+            return (void *)1;
+        }
+
         // TODO: don't copy; steal, since the pointer will be destroyed no
         // matter what.
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
@@ -413,6 +420,9 @@ public:
 
     virtual void commit(Epoch new_epoch, void * setup_data) throw ()
     {
+        // If it was a removal there is nothing to do (except maybe clean up?)
+        if (setup_data == (void *)1) return;
+
         const VT * d = vt();
 
         // Now that it's definitive, we have an older entry to clean up
@@ -436,6 +446,9 @@ public:
     virtual void rollback(Epoch new_epoch, void * local_data,
                           void * setup_data) throw ()
     {
+        // If it was a removal there is nothing to do
+        if (setup_data == (void *)1) return;
+
         // The commit didn't happen.  We need to:
         // 1.  Free up the memory associated with the object that we just
         //     serialized.  Since it was published, something might be
@@ -534,11 +547,14 @@ public:
 
     virtual std::string print_local_value(void * val) const
     {
+        if (!val) return "REMOVED";
         return ostream_format(*reinterpret_cast<T *>(val));
     }
 
     virtual void destroy_local_value(void * val) const
     {
+        // Check if the object was removed
+        if (!val || val == (void *)1) return;
         current_trans->free_local_value<T>(val);
     }
 };

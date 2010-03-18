@@ -40,7 +40,7 @@ struct PVOEntry {
 #endif
 
     PVOEntry()
-        : offset(NO_OFFSET)
+        : offset(NO_OFFSET), removed(false), removed_explicitly(false)
     {
     }
 
@@ -61,6 +61,8 @@ struct PVOEntry {
     
     uint64_t offset;
     boost::shared_ptr<PVO> local;
+    bool removed;
+    bool removed_explicitly;
 };
 
 std::ostream & operator << (std::ostream & stream,
@@ -113,7 +115,7 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
         }
 
         if (entry.offset == PVOEntry::NO_OFFSET)
-            throw Exception("getting local object with no offset");
+            throw ML::Exception("getting local object with no offset");
 
         boost::shared_ptr<TargetPVO> result
             (TargetPVO::reconstituted(obj, entry.offset, owner),
@@ -121,6 +123,29 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
 
         entry.local = result;
         return result;
+    }
+
+    // NOTE: do we really need to do all of this?  We could do everything at
+    // commit time, apart from decrementing the object count and making sure
+    // that an object wasn't explicitly removed twice.
+    void remove(ObjectId id, PVOManager * owner, bool explicitly)
+    {
+        // The object will be removed
+        if (id < 0 || id >= size())
+            throw ML::Exception("remove: invalid object");
+
+        PVOEntry & entry = at(id);
+
+        if (!entry.removed) {
+            entry.removed = true;
+            entry.removed_explicitly = explicitly;
+            --object_count_;
+        }
+        else {
+            if (entry.removed_explicitly && explicitly)
+                throw Exception("attempt to double-remove an object");
+            entry.removed_explicitly = entry.removed_explicitly || explicitly;
+        }
     }
 
     size_t object_count_;
@@ -219,13 +244,11 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
 
     size_t object_count() const;
 
-#if 0
-    /** Add the given PVO to the current sandbox's version of this table. */
-    ObjectId add(PVO * pvo)
+    // Notify that the given object has been removed in the current view
+    void remove(ObjectId object_id, bool explicitly)
     {
-        return mutate().add(pvo);
+        mutate().remove(object_id, this, explicitly);
     }
-#endif
 
     /** Set a new persistent version for an object.  This will record that
         there is a new persistent version on disk for the given object, so

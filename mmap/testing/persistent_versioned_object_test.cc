@@ -398,10 +398,25 @@ BOOST_AUTO_TEST_CASE( test_persistence )
             BOOST_CHECK_EQUAL(obj1.read(), 23);
             BOOST_CHECK_EQUAL(obj2.read(), 45);
 
-            BOOST_CHECK_EQUAL(store.object_count(), 0);
+            BOOST_CHECK_EQUAL(store.object_count(), 2);
+
+            cerr << "before remove obj1" << endl;
+            trans.Sandbox::dump();
+            cerr << "------------------" << endl << endl;
 
             obj1.remove();
+
+            BOOST_CHECK_EQUAL(store.object_count(), 1);
+
+            cerr << "after remove obj1" << endl;
+            trans.Sandbox::dump();
+            cerr << "------------------" << endl << endl;
+
             obj2.remove();
+
+            cerr << "after remove obj2" << endl;
+            trans.Sandbox::dump();
+            cerr << "------------------" << endl << endl;
 
             BOOST_CHECK_EQUAL(store.object_count(), 0);
             
@@ -414,8 +429,8 @@ BOOST_AUTO_TEST_CASE( test_persistence )
 
             // Give the memory time to be reclaimed
         }
-
-        BOOST_CHECK_EQUAL(free_memory_before, store.get_free_memory());
+        
+        BOOST_CHECK_EQUAL(free_memory_before - store.get_free_memory(), 0);
     }
     
     BOOST_CHECK_EQUAL(constructed, destroyed);

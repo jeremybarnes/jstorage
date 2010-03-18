@@ -365,9 +365,10 @@ set_local_value(Versioned_Object * obj, void * val)
         
     void * old_value = 0;
         
-    if (!inserted.second) {
+    if (!inserted.second || inserted.first->automatic) {
         old_value = inserted.first->val;
         inserted.first->val = val;
+        inserted.first->automatic = false;
     }
         
     return std::make_pair(old_value, !inserted.second);
