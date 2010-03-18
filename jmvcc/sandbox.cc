@@ -306,13 +306,15 @@ struct Sandbox::Dump_Value {
 
     bool operator () (const Versioned_Object * obj, const Entry & entry)
     {
-        stream << s << "  " << i << " at " << obj;
+        stream << s << "  " << i << " at " << obj << " "
+               << type_name(*obj) << " entry@ " << &entry
+               << " prev " << entry.prev << " next " << entry.next
+               << " parent " << obj->parent();
         if (entry.automatic)
-            cerr << " [AUTO] ";
-        else cerr << ": value "
-                  << obj->print_local_value(entry.val)
-                  << " parent " << obj->parent()
-                  << endl;
+            stream << " [AUTO]" << endl;
+        else stream << " value " << entry.val
+                    << " " << obj->print_local_value(entry.val)
+                    << endl;
         
         ++i;
         return true;

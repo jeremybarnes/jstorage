@@ -174,7 +174,8 @@ operator << (std::ostream & stream, const PVOManagerVersion & ver)
 
 PVOManager::
 PVOManager(ObjectId id, PVOManager * owner)
-    : Underlying(id, owner)
+    : Underlying(id, owner, current_trans != 0/* add_local */,
+                 PVOManagerVersion())
 {
     cerr << "creating PVOManager " << this << " with ID " << id
          << " and owner " << owner << endl;

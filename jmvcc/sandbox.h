@@ -165,7 +165,8 @@ public:
     std::pair<T *, bool> local_value(Versioned_Object * obj)
     {
         Local_Values::const_iterator it = local_values.find(obj);
-        if (it == local_values.end()) return std::make_pair((T *)0, false);
+        if (it == local_values.end() || it->second.automatic)
+            return std::make_pair((T *)0, false);
         return std::make_pair(reinterpret_cast<T *>(it->second.val), true);
     }
 
@@ -176,13 +177,31 @@ public:
     {
         bool inserted;
         Entry * entry;
+
         boost::tie(entry, inserted)
             = local_values.insert(obj);
+
+        using namespace std;
+        cerr << "local_value insert: inserted = " << inserted << " entry = "
+             << entry << " entry->automatic = " << entry->automatic
+             << endl;
+        cerr << "dump(): " << endl;
+        dump(cerr);
+        cerr << endl;
+        
         if (inserted || entry->automatic) {
             entry->val = malloc(sizeof(T));
             new (entry->val) T(initial_value);
             entry->automatic = false;
+
+            cerr << "after setup" << endl;
+            cerr << "dump(): " << endl;
+            dump(cerr);
+            cerr << endl;
+
+            cerr << "entry->val = " << entry->val << endl;
         }
+
         return reinterpret_cast<T *>(entry->val);
     }
     

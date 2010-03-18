@@ -57,12 +57,24 @@ struct TypedPVO
     T & mutate()
     {
         if (!current_trans) no_transaction_exception(this);
+
+        using namespace std;
+        cerr << "before mutate: " << endl;
+        current_trans->Sandbox::dump(cerr);
+        cerr << endl;
+
         bool has_local;
         T * local;
         boost::tie(local, has_local) = current_trans->local_value<T>(this);
 
+        cerr << "has_local = " << has_local << " local = "
+             << local << endl;
+
         if (!has_local) {
             const T * value = value_at_epoch(current_trans->epoch());
+
+            cerr << "value = " << value << endl;
+
             local = current_trans->local_value<T>(this, *value);
             
             if (!local)
@@ -70,6 +82,11 @@ struct TypedPVO
         }
         else if (!local)
             throw Exception("attempt to access a removed object");
+
+        using namespace std;
+        cerr << "after mutate: local = " << local << endl;
+        current_trans->Sandbox::dump(cerr);
+        cerr << endl;
         
         return *local;
     }
@@ -143,7 +160,7 @@ struct TypedPVO
     static TypedPVO<T> *
     reconstituted(ObjectId id, size_t offset, PVOManager * owner)
     {
-        TypedPVO<T> * result = new TypedPVO<T>(id, owner);
+        TypedPVO<T> * result = new TypedPVO<T>(id, owner, false, T());
         
         try {
             PVOStore * store = to_store(owner);
@@ -212,7 +229,7 @@ protected:
     friend class PVOManagerVersion;
 
     /** Create it and add it to the current transaction. */
-    TypedPVO(PVOManager * owner, const T & val = T())
+    TypedPVO(PVOManager * owner, const T & val)
         : PVO(owner)
     {
         version_table = VT::create(new T(val), 1);
@@ -222,12 +239,12 @@ protected:
     /** Create it with the given ID and owner, but don't add it anywhere.  This
         constructor is mostly used to bootstrap.  If we are currently in a
         transaction, it will be added to the sandbox however. */
-    TypedPVO(ObjectId id, PVOManager * owner, const T & val = T())
+    TypedPVO(ObjectId id, PVOManager * owner, bool add_local,
+             const T & val)
         : PVO(id, owner)
     {
         version_table = VT::create(new T(val), 1);
-        if (current_trans)
-            mutate();
+        if (add_local) mutate();
     }
     
     ~TypedPVO()

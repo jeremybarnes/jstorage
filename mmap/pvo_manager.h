@@ -89,7 +89,8 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
         ObjectId id = size();
 
         boost::shared_ptr<TargetPVO> result
-            (new TargetPVO(id, owner, arg1), PVOEntry::PVODestroyer());
+            (new TargetPVO(id, owner, current_trans != 0 /* register */, arg1),
+             PVOEntry::PVODestroyer());
 
         push_back(PVOEntry(result));
         ++object_count_;
