@@ -536,7 +536,7 @@ public:
 
     virtual void destroy_local_value(void * val) const
     {
-        reinterpret_cast<T *>(val)->~T();
+        current_trans->free_local_value<T>(val);
     }
 };
 
