@@ -245,7 +245,7 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
     size_t object_count() const;
 
     // Notify that the given object has been removed in the current view
-    void remove(ObjectId object_id, bool explicitly)
+    void remove_child(ObjectId object_id, bool explicitly)
     {
         mutate().remove(object_id, this, explicitly);
     }

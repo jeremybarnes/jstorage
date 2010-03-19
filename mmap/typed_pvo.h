@@ -113,7 +113,7 @@ struct TypedPVO
         return *result;
     }
 
-    void remove()
+    virtual void remove()
     {
         if (!current_trans) no_transaction_exception(this);
 
@@ -131,7 +131,7 @@ struct TypedPVO
             current_trans->free_local_value<T>(old_local_value);
         }
         
-        owner()->remove(id(), true /* explicitly */);
+        owner()->remove_child(id(), true /* explicitly */);
     }
     
     size_t history_size() const

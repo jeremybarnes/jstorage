@@ -57,6 +57,10 @@ struct PVO : public JMVCC::Versioned_Object {
 
     virtual PVO * parent() const;
 
+    /** Remove the given object, in the current transaction.  Normally this
+        will ask the parent to remove it. */
+    virtual void remove() = 0;
+
 protected:
     PVO(ObjectId id, PVOManager * owner)
         : id_(id), owner_(owner)
