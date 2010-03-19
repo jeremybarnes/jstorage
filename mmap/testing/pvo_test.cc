@@ -236,8 +236,10 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
         {
             Local_Transaction trans;
             
-            //PVORef<Obj> obj1 = store.find<Obj>(oid1);
-            //PVORef<Obj> obj2 = store.find<Obj>(oid2);
+            BOOST_CHECK(store.object_entry(oid1).offset
+                        != PVOEntry::NO_OFFSET);
+            BOOST_CHECK(store.object_entry(oid2).offset
+                        != PVOEntry::NO_OFFSET);
 
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
@@ -256,6 +258,11 @@ BOOST_AUTO_TEST_CASE( test_commit_objects_committed )
 
             BOOST_CHECK_EQUAL(obj1.read(), 0);
             BOOST_CHECK_EQUAL(obj2.read(), 1);
+
+            BOOST_CHECK(store.object_entry(oid1).offset
+                        != PVOEntry::NO_OFFSET);
+            BOOST_CHECK(store.object_entry(oid2).offset
+                        != PVOEntry::NO_OFFSET);
 
             // Make sure the objects didn't get committed
             BOOST_CHECK_EQUAL(store.object_count(), 2);
@@ -337,6 +344,11 @@ BOOST_AUTO_TEST_CASE( test_persistence )
             
             PVORef<Obj> obj1 = store.lookup<Obj>(oid1);
             PVORef<Obj> obj2 = store.lookup<Obj>(oid2);
+
+            BOOST_CHECK(store.object_entry(oid1).offset
+                        != PVOEntry::NO_OFFSET);
+            BOOST_CHECK(store.object_entry(oid2).offset
+                        != PVOEntry::NO_OFFSET);
 
             BOOST_CHECK_EQUAL(obj1.read(), 14);
             BOOST_CHECK_EQUAL(obj2.read(), 31);
@@ -497,6 +509,8 @@ struct Object_Test_Thread2 {
             
             bool succeeded = false;
 
+            Var new_val1, new_val2;
+
             while (!succeeded) {
                 Local_Transaction trans;
                 
@@ -521,11 +535,21 @@ struct Object_Test_Thread2 {
                 Var & val1 = store.lookup<Var>(var1)->mutate();
                 Var & val2 = store.lookup<Var>(var2)->mutate();
                     
-                val1 -= 1;
-                val2 += 1;
-                
+                new_val1 = val1 -= 1;
+                new_val2 = val2 += 1;
+
                 succeeded = trans.commit();
                 local_failures += !succeeded;
+
+                cerr << endl << endl;
+            }
+
+            if (true /* one thread only */) {
+                Local_Transaction trans;
+
+                if (var1 != var2)
+                    BOOST_CHECK_EQUAL(new_val1, store.lookup<Var>(var1)->read());
+                BOOST_CHECK_EQUAL(new_val2, store.lookup<Var>(var2)->read());
             }
         }
 
@@ -564,6 +588,13 @@ void run_object_test2(int nthreads, int niter, int nvals)
                 BOOST_REQUIRE_EQUAL(ids[i], i);
             }
             trans.commit();
+        }
+
+        {
+            Local_Transaction trans;
+            for (unsigned i = 0;  i < nvals;  ++i)
+                BOOST_REQUIRE(store.object_entry(i).offset
+                              != PVOEntry::NO_OFFSET);
         }
         
         boost::barrier barrier(nthreads);

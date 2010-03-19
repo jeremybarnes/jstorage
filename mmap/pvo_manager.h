@@ -238,6 +238,10 @@ struct PVOManager : public TypedPVO<PVOManagerVersion> {
         return lookup<TypedPVO<T> >(obj);
     }
 
+    const PVOEntry & object_entry(ObjectId id) const
+    {
+        return read()[id];
+    }
 
     size_t object_count() const;
 

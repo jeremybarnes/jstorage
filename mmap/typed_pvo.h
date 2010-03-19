@@ -383,6 +383,8 @@ public:
 
         // TODO: don't copy; steal, since the pointer will be destroyed no
         // matter what.
+        using namespace std;
+        cerr << "setup " << this << type_name(*this) << endl;
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
 
         PVOManager * owner = this->owner();
@@ -420,6 +422,9 @@ public:
 
     virtual void commit(Epoch new_epoch, void * setup_data) throw ()
     {
+        using namespace std;
+        cerr << "commit " << this << " " << type_name(*this) << endl;
+
         if (setup_data == (void *)1) setup_data = 0;
 
         const VT * d = vt();
@@ -439,7 +444,8 @@ public:
         }
 
         void * old_mem = owner()->set_persistent_version(id(), setup_data);
-        
+        cerr << "old_mem = " << old_mem << endl;
+
         // Deallocate the memory.  TODO: should we wait for the end of the
         // critical section?
         if (old_mem)

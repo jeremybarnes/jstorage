@@ -116,7 +116,12 @@ reserialize(const PVOManagerVersion & obj,
     
     mem += 3;
 
+    cerr << "reserialize at " << mem << endl;
+
     for (unsigned i = 0;  i < obj.size();  ++i) {
+        cerr << "object " << i << " offset " << obj[i].offset
+             << " removed " << obj[i].removed << endl;
+
         if (obj[i].removed)
             mem[i] = PVOEntry::NO_OFFSET;
         else mem[i] = obj[i].offset;
@@ -165,7 +170,7 @@ deallocate(void * mem, MemoryManager & mm)
         throw Exception("how do we deallocate unknown version");
 
     
-    size_t mem_needed = (size + 2) * 8;
+    size_t mem_needed = (size + 3) * 8;
     
     mm.deallocate(mem, mem_needed);
 }
@@ -208,7 +213,9 @@ set_persistent_version(ObjectId object, void * new_version)
 
     void * result = (old_offset == PVOEntry::NO_OFFSET
                      ? 0: store()->to_pointer(old_offset));
-    
+
+    cerr << "set_persistent_version: object " << object << " goes from "
+         << result << " to " << new_version << endl;
     return result;
 }
 
@@ -224,6 +231,7 @@ void *
 PVOManager::
 setup(Epoch old_epoch, Epoch new_epoch, void * new_value)
 {
+    cerr << "PVOManager setup: read() = " << &read() << endl;
     return Underlying::setup(old_epoch, new_epoch, new_value);
 }
 
@@ -231,12 +239,16 @@ void
 PVOManager::
 commit(Epoch new_epoch, void * setup_data) throw ()
 {
+    cerr << "PVOManager commit: read() = " << &read() << endl;
+    cerr << "1.  compact" << endl;
     mutate().compact();
 
+    cerr << "2.  reserialize" << endl;
     // Setup_Data points to where our new data is
     // We need to record the actual values on this table
     PVOManagerVersion::reserialize(read(), setup_data, *store());
 
+    cerr << "3.  Underlying" << endl;
     // Write the new table
     Underlying::commit(new_epoch, setup_data);
 }
