@@ -541,7 +541,6 @@ struct Object_Test_Thread2 {
                 succeeded = trans.commit();
                 local_failures += !succeeded;
 
-                cerr << endl << endl;
             }
 
             if (true /* one thread only */) {

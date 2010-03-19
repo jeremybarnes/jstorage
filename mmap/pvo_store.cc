@@ -102,9 +102,9 @@ void *
 PVOStore::
 allocate_aligned(size_t nbytes, size_t alignment)
 {
-    size_t free_before = itl->mmap.get_free_memory();
+    //size_t free_before = itl->mmap.get_free_memory();
     void * result = itl->mmap.allocate_aligned(nbytes, alignment);
-#if 1
+#if 0
     cerr << "allocated " << nbytes << " bytes (really "
          << free_before - itl->mmap.get_free_memory()
          << ") at alignment " << alignment << " returned "
@@ -131,7 +131,7 @@ void
 PVOStore::
 deallocate(void * ptr, size_t bytes)
 {
-    cerr << "deallocated " << bytes << " bytes at " << ptr << endl;
+    //cerr << "deallocated " << bytes << " bytes at " << ptr << endl;
     return itl->mmap.deallocate(ptr);
 }
 
@@ -151,8 +151,8 @@ set_persistent_version(ObjectId object, void * new_version)
         void * result = to_pointer(old_offset);
         size_t new_offset
             = (const char *)new_version - (const char *)itl->mmap.get_address();
-        cerr << "ROOT object offset goes from " << old_offset << " to "
-             << new_offset << endl;
+        //cerr << "ROOT object offset goes from " << old_offset << " to "
+        //     << new_offset << endl;
         //cerr << "old_offset = " << *itl->root_offset << endl;
         //cerr << "new_offset = " << new_offset << endl;
         *itl->root_offset = new_offset;

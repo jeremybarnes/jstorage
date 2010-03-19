@@ -247,6 +247,23 @@ protected:
     {
         std::swap(version_table, other.version_table);
     }
+
+    // Used to set the pointer in the last value in an atomic manner.  The
+    // old value will be returned.  Will retry until the write is visible.
+    // Used in commit() of parents.
+    T * set_last_value(T * new_value)
+    {
+        VT * vt;
+        T * result = 0;
+        do {
+            vt = version_table;
+            result = vt->back().value;
+            vt->back().value = new_value;
+            memory_barrier();
+        } while (version_table->back().value != new_value);
+
+        return result;
+    }
         
 public:
     // Implement object interface
@@ -383,8 +400,8 @@ public:
 
         // TODO: don't copy; steal, since the pointer will be destroyed no
         // matter what.
-        using namespace std;
-        cerr << "setup " << this << type_name(*this) << endl;
+        //using namespace std;
+        //cerr << "setup " << this << type_name(*this) << endl;
         std::auto_ptr<T> nv(new T(*reinterpret_cast<T *>(new_value)));
 
         PVOManager * owner = this->owner();
@@ -422,8 +439,9 @@ public:
 
     virtual void commit(Epoch new_epoch, void * setup_data) throw ()
     {
-        using namespace std;
-        cerr << "commit " << this << " " << type_name(*this) << endl;
+        //using namespace std;
+        //cerr << "commit " << this << " " << type_name(*this)
+        //     << " setup_data = " << setup_data << endl;
 
         if (setup_data == (void *)1) setup_data = 0;
 
@@ -444,7 +462,7 @@ public:
         }
 
         void * old_mem = owner()->set_persistent_version(id(), setup_data);
-        cerr << "old_mem = " << old_mem << endl;
+        //cerr << "old_mem = " << old_mem << endl;
 
         // Deallocate the memory.  TODO: should we wait for the end of the
         // critical section?
