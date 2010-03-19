@@ -104,7 +104,13 @@ void *
 PVOStore::
 allocate_aligned(size_t nbytes, size_t alignment)
 {
-    return itl->mmap.allocate_aligned(nbytes, alignment);
+    size_t free_before = itl->mmap.get_free_memory();
+    void * result = itl->mmap.allocate_aligned(nbytes, alignment);
+    cerr << "allocated " << nbytes << " bytes (really "
+         << free_before - itl->mmap.get_free_memory()
+         << ") at alignment " << alignment << " returned "
+         << result << " offset " << to_offset(result) << endl;
+    return result;
 }
 
 size_t

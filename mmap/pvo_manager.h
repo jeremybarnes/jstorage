@@ -34,11 +34,6 @@ struct PVOEntry {
 
     static const uint64_t NO_OFFSET = (uint64_t)-1;
 
-#if 0
-    static const uint64_t NEW_OBJECT = (uint64_t)-2;
-    static const uint64_t DELETED_OBJECT = (uint64_t)-3;
-#endif
-
     PVOEntry()
         : offset(NO_OFFSET), removed(false), removed_explicitly(false)
     {
@@ -55,7 +50,8 @@ struct PVOEntry {
 
 
     PVOEntry(const boost::shared_ptr<PVO> & local)
-        : offset(NO_OFFSET), local(local)
+        : offset(NO_OFFSET), local(local),
+          removed(false), removed_explicitly(false)
     {
     }
     
@@ -154,6 +150,9 @@ struct PVOManagerVersion : public std::vector<PVOEntry> {
     {
         return object_count_;
     }
+
+    /** Reduce the size as much as possible, ready for a commit. */
+    void compact();
     
     static void * serialize(const PVOManagerVersion & obj,
                             MemoryManager & mm);

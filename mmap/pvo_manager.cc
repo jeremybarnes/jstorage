@@ -24,9 +24,20 @@ namespace JMVCC {
 std::ostream & operator << (std::ostream & stream,
                             const PVOEntry & entry)
 {
-    using namespace std;
-    return stream << entry.local << " ref " << entry.local.use_count() << " "
-                  << type_name(*entry.local) << endl;
+    stream << entry.local;
+    if (entry.local)
+        stream << " " << type_name(*entry.local);
+    stream << " ref " << entry.local.use_count() << " "
+           << " offset ";
+    if (entry.offset != PVOEntry::NO_OFFSET)
+        stream << entry.offset;
+    else stream << "<NONE>";
+    if (entry.removed)
+        stream << " REM";
+    if (entry.removed_explicitly)
+        stream << " EXP";
+    stream << endl;
+    return stream;
 }
 
 
@@ -50,6 +61,24 @@ PVOManagerVersion::
 ~PVOManagerVersion()
 {
     clear();
+}
+
+void
+PVOManagerVersion::
+compact()
+{
+    cerr << "---------------- compact" << endl;
+    cerr << "size() = " << size() << endl;
+
+    for (int i = size() - 1;  i >= 0;  --i) {
+        cerr << "  i = " << i << operator [] (i) << endl;
+        
+        if (operator [] (i).removed) {
+            pop_back();
+            cerr << "    REMOVED" << endl;
+        }
+        else break;
+    }
 }
 
 void *
@@ -85,9 +114,12 @@ reserialize(const PVOManagerVersion & obj,
 {
     uint64_t * mem = (uint64_t *)where;
 
+    if (obj.object_count() > obj.size())
+        throw Exception("inconsistent version table");
+
     mem[0] = 0;  // version
     mem[1] = obj.size();  // size
-    mem[2] = obj.object_count();  // size
+    mem[2] = obj.object_count();
     
     cerr << "serialize" << endl;
     cerr << "mem = " << mem << endl;
@@ -98,7 +130,9 @@ reserialize(const PVOManagerVersion & obj,
 
     for (unsigned i = 0;  i < obj.size();  ++i) {
         cerr << "  object " << i << " offset " << obj[i].offset << endl;
-        mem[i] = obj[i].offset;
+        if (obj[i].removed && false)
+            mem[i] = PVOEntry::NO_OFFSET;
+        else mem[i] = obj[i].offset;
     }
 }
 
@@ -229,6 +263,8 @@ void
 PVOManager::
 commit(Epoch new_epoch, void * setup_data) throw ()
 {
+    mutate().compact();
+
     // Setup_Data points to where our new data is
     // We need to record the actual values on this table
     PVOManagerVersion::reserialize(read(), setup_data, *store());
