@@ -117,7 +117,7 @@ reserialize(const PVOManagerVersion & obj,
     mem += 3;
 
     for (unsigned i = 0;  i < obj.size();  ++i) {
-        if (obj[i].removed && false)
+        if (obj[i].removed)
             mem[i] = PVOEntry::NO_OFFSET;
         else mem[i] = obj[i].offset;
     }
