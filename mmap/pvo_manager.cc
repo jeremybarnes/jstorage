@@ -67,16 +67,9 @@ void
 PVOManagerVersion::
 compact()
 {
-    cerr << "---------------- compact" << endl;
-    cerr << "size() = " << size() << endl;
-
     for (int i = size() - 1;  i >= 0;  --i) {
-        cerr << "  i = " << i << operator [] (i) << endl;
-        
-        if (operator [] (i).removed) {
+        if (operator [] (i).removed)
             pop_back();
-            cerr << "    REMOVED" << endl;
-        }
         else break;
     }
 }
@@ -121,15 +114,9 @@ reserialize(const PVOManagerVersion & obj,
     mem[1] = obj.size();  // size
     mem[2] = obj.object_count();
     
-    cerr << "serialize" << endl;
-    cerr << "mem = " << mem << endl;
-    cerr << "obj.size() = " << obj.size() << " obj.object_count() = "
-         << obj.object_count() << endl;
-    
     mem += 3;
 
     for (unsigned i = 0;  i < obj.size();  ++i) {
-        cerr << "  object " << i << " offset " << obj[i].offset << endl;
         if (obj[i].removed && false)
             mem[i] = PVOEntry::NO_OFFSET;
         else mem[i] = obj[i].offset;
@@ -145,24 +132,13 @@ reconstitute(PVOManagerVersion & obj,
     const uint64_t * md = (const uint64_t *)mem;
     uint64_t ver = md[0];
 
-    cerr << "reconstitute" << endl;
-
-    cerr << "mem = " << mem << endl;
-
-    cerr << "ver = " << ver << endl;
-
     if (ver != 0)
         throw Exception("how do we deallocate unknown version");
 
 
     uint64_t size = md[1];
 
-    cerr << "size = " << size << endl;
-
     uint64_t object_count = md[2];
-
-    cerr << "object_count = " << object_count << endl;
-
 
     if (!obj.empty())
         throw Exception("reconstitution over non-empty version table");
@@ -173,7 +149,6 @@ reconstitute(PVOManagerVersion & obj,
     const uint64_t * data = md + 3;
 
     for (unsigned i = 0;  i < size;  ++i) {
-        cerr << "object " << i << " offset " << data[i] << endl;
         obj[i].offset = data[i];
     }
 }
@@ -211,8 +186,6 @@ PVOManager(ObjectId id, PVOManager * owner)
     : Underlying(id, owner, current_trans != 0/* add_local */,
                  PVOManagerVersion())
 {
-    cerr << "creating PVOManager " << this << " with ID " << id
-         << " and owner " << owner << endl;
 }
 
 size_t
@@ -226,17 +199,12 @@ void *
 PVOManager::
 set_persistent_version(ObjectId object, void * new_version)
 {
-    cerr << "set_persistent_version for " << object << " to " << new_version
-         << endl;
-
     PVOManagerVersion & ver = mutate();
     if (object > ver.size())
         throw Exception("invalid object id");
 
     size_t old_offset = ver[object].offset;
-    cerr << "  old offset is " << old_offset << endl;
     ver[object].offset = store()->to_offset(new_version);
-    cerr << "  new offset is " << ver[object].offset << endl;
 
     void * result = (old_offset == PVOEntry::NO_OFFSET
                      ? 0: store()->to_pointer(old_offset));

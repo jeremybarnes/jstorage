@@ -42,8 +42,6 @@ struct PVOEntry {
     struct PVODestroyer {
         void operator () (PVO * x) const
         {
-            using namespace std;
-            cerr << "deleting " << x << endl;
             delete x;
         }
     };

@@ -185,10 +185,6 @@ struct Sandbox::Setup_Commit {
         }
         void * result = obj->setup(old_epoch, new_epoch, entry.val);
 
-        cerr << "setup_commit for " << obj << " " << type_name(*obj)
-             << " with local value " << entry.val << " returned "
-             << result << endl;
-
         if (result) commit_data.push_back(result);
         return result;
     }
@@ -207,10 +203,6 @@ struct Sandbox::Commit {
     bool operator () (Versioned_Object * obj, Entry & entry)
     {
         if (entry.automatic) return true;
-
-        cerr << "committing: obj " << obj << " " << type_name(*obj)
-             << " index = " << index << " commit_data.size() = "
-             << commit_data.size() << endl;
 
         if (index >= commit_data.size())
             throw Exception("Sandbox::Commit: indexes out of range");
@@ -243,6 +235,8 @@ Epoch
 Sandbox::
 commit(Epoch old_epoch)
 {
+    bool debug = false;
+
     Epoch new_epoch = get_current_epoch() + 1;
 
     // Check that everything is commitable, before the lock is obtained
@@ -263,21 +257,24 @@ commit(Epoch old_epoch)
     vector<void *> commit_data;
     commit_data.reserve(local_values.size());
 
-    cerr << "-------------- before setup" << endl;
-    dump(cerr);
-    cerr << "--------------" << endl << endl;
+    if (debug) {
+        cerr << "-------------- before setup" << endl;
+        dump(cerr);
+        cerr << "--------------" << endl << endl;
+    }
 
     Setup_Commit setup_commit(old_epoch, new_epoch, commit_data);
     failed_object = local_values.do_in_order(setup_commit);
 
-    cerr << "setup_commit done: commit_data.size() = "
-         << commit_data.size() << " failed_object = " << failed_object
-         << endl;
+    if (debug) {
+        cerr << "setup_commit done: commit_data.size() = "
+             << commit_data.size() << " failed_object = " << failed_object
+             << endl;
 
-    cerr << "-------------- after setup" << endl;
-    dump(cerr);
-    cerr << "--------------" << endl << endl;
-
+        cerr << "-------------- after setup" << endl;
+        dump(cerr);
+        cerr << "--------------" << endl << endl;
+    }
 
     bool commit_succeeded = !failed_object;
 

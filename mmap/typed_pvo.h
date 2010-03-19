@@ -426,13 +426,6 @@ public:
 
         // Now that it's definitive, we may have an older version to clean up
 
-        if (!setup_data) {
-            using namespace std;
-            cerr << "deleting object: " << endl;
-            dump(cerr);
-            cerr << "d->size() = " << d->size() << endl;
-        }
-
         if (d->size() > 1) {
             Epoch valid_from = 1;
             if (d->size() > 2)
@@ -442,18 +435,11 @@ public:
         }
         else {
             // This object should never have been committed
-            using namespace std;
-            cerr << "object was never committed" << endl;
+            // TODO: check this condition
         }
 
-        using namespace std;
-        cerr << "set_persistent_version for object " << id() << " of type "
-             << type_name<T>() << endl;
         void * old_mem = owner()->set_persistent_version(id(), setup_data);
         
-        using namespace std;
-        cerr << "old_mem = " << old_mem << endl;
-
         // Deallocate the memory.  TODO: should we wait for the end of the
         // critical section?
         if (old_mem)

@@ -55,8 +55,6 @@ struct PVOStore::Itl {
 
     void bootstrap_open()
     {
-        cerr << "bootstrap_open: root_offset = " << *root_offset << endl;
-
         const void * mem = (const char *)mmap.get_address() + *root_offset;
 
         // Bootstrap the initial version into existence
@@ -104,12 +102,14 @@ void *
 PVOStore::
 allocate_aligned(size_t nbytes, size_t alignment)
 {
-    size_t free_before = itl->mmap.get_free_memory();
+    //size_t free_before = itl->mmap.get_free_memory();
     void * result = itl->mmap.allocate_aligned(nbytes, alignment);
+#if 0
     cerr << "allocated " << nbytes << " bytes (really "
          << free_before - itl->mmap.get_free_memory()
          << ") at alignment " << alignment << " returned "
          << result << " offset " << to_offset(result) << endl;
+#endif
     return result;
 }
 
@@ -146,13 +146,13 @@ PVOStore::
 set_persistent_version(ObjectId object, void * new_version)
 {
     if (object == ROOT_OBJECT_ID) {
-        cerr << "setting version for ROOT_OBJECT_ID" << endl;
+        //cerr << "setting version for ROOT_OBJECT_ID" << endl;
         size_t old_offset = *itl->root_offset;
         void * result = to_pointer(old_offset);
         size_t new_offset
             = (const char *)new_version - (const char *)itl->mmap.get_address();
-        cerr << "old_offset = " << *itl->root_offset << endl;
-        cerr << "new_offset = " << new_offset << endl;
+        //cerr << "old_offset = " << *itl->root_offset << endl;
+        //cerr << "new_offset = " << new_offset << endl;
         *itl->root_offset = new_offset;
         return result;
     }
