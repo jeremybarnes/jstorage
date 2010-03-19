@@ -63,6 +63,13 @@ struct Serializer<T,
         return mem;
     }
     
+    static void reconstitute(T & val,
+                             const void * mem,
+                             MemoryManager & mm)
+    {
+        val = *(T *)mem;
+    }
+
     static void deallocate(void * mem, MemoryManager & mm)
     {
         size_t sz = sizeof(SA);

@@ -21,6 +21,8 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
+#include <boost/thread.hpp>
+#include <boost/thread/barrier.hpp>
 #include <iostream>
 #include "jml/utils/guard.h"
 #include <boost/bind.hpp>
@@ -30,6 +32,7 @@
 #include "jml/utils/hash_map.h"
 #include <boost/interprocess/file_mapping.hpp>
 #include <signal.h>
+#include "jml/arch/timers.h"
 
 using namespace boost::interprocess;
 
@@ -436,6 +439,8 @@ BOOST_AUTO_TEST_CASE( test_persistence )
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
 
+#if 0
+
 size_t counter = 1;
 
 struct With_Parent : public Versioned2<Obj> {
@@ -457,24 +462,23 @@ struct With_Parent : public Versioned2<Obj> {
     }
 };
 
+#endif
 
 
-#if 0
-template<class Var>
+// Stress test with multiple threads
+template<typename Var>
 struct Object_Test_Thread2 {
-    typedef typename Var::value_type Val;
-
-    Var * vars;
+    PVOStore & store;
     int nvars;
     int iter;
     boost::barrier & barrier;
     size_t & failures;
 
-    Object_Test_Thread2(Var * vars,
+    Object_Test_Thread2(PVOStore & store,
                         int nvars,
                         int iter, boost::barrier & barrier,
                         size_t & failures)
-        : vars(vars), nvars(nvars), iter(iter), barrier(barrier),
+        : store(store), nvars(nvars), iter(iter), barrier(barrier),
           failures(failures)
     {
     }
@@ -500,8 +504,8 @@ struct Object_Test_Thread2 {
                 ssize_t total = 0;
 
                 for (unsigned i = 0;  i < nvars;  ++i)
-                    total += vars[i].read();
-
+                    total += store.lookup<Var>(i)->read();
+                
                 if (total != 0) {
                     ACE_Guard<ACE_Mutex> guard(commit_lock);
                     cerr << "--------------- total not zero" << endl;
@@ -509,13 +513,13 @@ struct Object_Test_Thread2 {
                     cerr << "total is " << total << endl;
                     cerr << "trans.epoch() = " << trans.epoch() << endl;
                     ++errors;
-                    for (unsigned i = 0;  i < nvars;  ++i)
-                        vars[i].dump();
+                    //for (unsigned i = 0;  i < nvars;  ++i)
+                    //    store.lookup<Var>(i).read()dump();
                     cerr << "--------------- end total not zero" << endl;
                 }
 
-                Val & val1 = vars[var1].mutate();
-                Val & val2 = vars[var2].mutate();
+                Var & val1 = store.lookup<Var>(var1)->mutate();
+                Var & val2 = store.lookup<Var>(var2)->mutate();
                     
                 val1 -= 1;
                 val2 += 1;
@@ -537,6 +541,10 @@ struct Object_Test_Thread2 {
 template<class Var>
 void run_object_test2(int nthreads, int niter, int nvals)
 {
+    const char * fname = "pvot_backing7";
+    remove_file_on_destroy destroyer1(fname);
+    unlink(fname);
+
     cerr << endl << "testing 2 with " << nthreads << " threads and "
          << niter << " iter"
          << " class " << demangle(typeid(Var).name()) << endl;
@@ -544,7 +552,20 @@ void run_object_test2(int nthreads, int niter, int nvals)
     constructed = destroyed = 0;
 
     {
-        Var vals[nvals];
+        // The region for persistent objects, as anonymous mapped memory
+        PVOStore store(create_only, fname, 65536);
+
+        ObjectId ids[nvals];
+
+        {
+            Local_Transaction trans;
+            for (unsigned i = 0;  i < nvals;  ++i) {
+                ids[i] = store.construct<Var>(0)->id();
+                BOOST_REQUIRE_EQUAL(ids[i], i);
+            }
+            trans.commit();
+        }
+        
         boost::barrier barrier(nthreads);
         boost::thread_group tg;
         
@@ -552,7 +573,7 @@ void run_object_test2(int nthreads, int niter, int nvals)
         
         Timer timer;
         for (unsigned i = 0;  i < nthreads;  ++i)
-            tg.create_thread(Object_Test_Thread2<Var>(vals, nvals, niter,
+            tg.create_thread(Object_Test_Thread2<Var>(store, nvals, niter,
                                                       barrier, failures));
         
         tg.join_all();
@@ -563,71 +584,43 @@ void run_object_test2(int nthreads, int niter, int nvals)
         {
             Local_Transaction trans;
             for (unsigned i = 0;  i < nvals;  ++i)
-                total += vals[i].read();
+                total += store.lookup<Var>(ids[i])->read();
         }
         
         BOOST_CHECK_EQUAL(snapshot_info.entry_count(), 0);
         
         BOOST_CHECK_EQUAL(total, 0);
-        for (unsigned i = 0;  i < nvals;  ++i) {
-            //cerr << "current_epoch = " << get_current_epoch() << endl;
-            if (vals[i].history_size() != 0)
-                vals[i].dump();
-            BOOST_CHECK_EQUAL(vals[i].history_size(), 0);
-        }
     }
 
     BOOST_CHECK_EQUAL(constructed, destroyed);
 }
-#endif
 
+BOOST_AUTO_TEST_CASE( stress_test )
+{
+    cerr << endl << endl << "========= test 2: multiple variables" << endl;
+    
+    run_object_test2<int>(1,  5000, 2);
+    //run_object_test2<int>(2,  5000, 2);
 
 #if 0
-{
-    BOOST_CHECK_EQUAL(store.object_count(), 0);
-        
-        // Put the current versions of both in the shared memory
-        addr1 = obj1.save(current_epoch(), mm);
-        addr2 = obj2.save(current_epoch(), mm);
-        
-        BOOST_CHECK_EQUAL(*(int *)addr1, 0);
-        BOOST_CHECK_EQUAL(*(int *)addr2, 1);
-        
-        // Make sure that they were put at the right place
-        BOOST_CHECK(mm.contains_address(addr1));
-        BOOST_CHECK(mm.contains_address(addr2));
-        
-        {
-            Local_Transaction trans;
-            BOOST_CHECK_EQUAL(obj1.read(), 0);
-            BOOST_CHECK_EQUAL(obj2.read(), 1);
-            
-            obj1.write(2);
-            obj2.write(3);
-            
-            BOOST_CHECK_EQUAL(obj1.read(), 2);
-            BOOST_CHECK_EQUAL(obj2.read(), 3);
-            
-            BOOST_CHECK(trans.commit());
-        }
-        
-        BOOST_CHECK_EQUAL(obj1.history_size(), 2);
-        BOOST_CHECK_EQUAL(obj2.history_size(), 2);
-        
-        // Make sure the objects were deleted and their bits set to all 1s
-        BOOST_CHECK_EQUAL(*(int *)addr1, -1);
-        BOOST_CHECK_EQUAL(*(int *)addr2, -1);
-        
-        {
-            Local_Transaction trans;
-            BOOST_CHECK_EQUAL(obj1.read(), 2);
-            BOOST_CHECK_EQUAL(obj2.read(), 3);
-        }
+    run_object_test2<Versioned2<int> >(2,  5000, 2);
+    run_object_test2<Versioned<int> >(10, 10000, 100);
+    run_object_test2<Versioned2<int> >(10, 10000, 100);
+    run_object_test2<Versioned<int> >(100, 1000, 10);
+    run_object_test2<Versioned2<int> >(100, 1000, 10);
+    run_object_test2<Versioned<int> >(1000, 100, 100);
+    run_object_test2<Versioned2<int> >(1000, 100, 100);
 
-        mm.save(current_epoch());
-        
-        BOOST_CHECK_EQUAL(mm.epoch(), current_epoch());
-    }
+    boost::timer t;
+    run_object_test2<Versioned<int> >(1, 1000000, 1);
+    cerr << "elapsed for 1000000 iterations: " << t.elapsed() << endl;
+    cerr << "for 2^32 iterations: " << (1ULL << 32) / 1000000.0 * t.elapsed()
+         << "s" << endl;
 
-}
+    t.restart();
+    run_object_test2<Versioned2<int> >(1, 1000000, 1);
+    cerr << "elapsed for 1000000 iterations: " << t.elapsed() << endl;
+    cerr << "for 2^32 iterations: " << (1ULL << 32) / 1000000.0 * t.elapsed()
+         << "s" << endl;
 #endif
+}
