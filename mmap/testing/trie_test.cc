@@ -26,7 +26,7 @@
 #include <boost/bind.hpp>
 #include <fstream>
 #include <vector>
-
+#include <bitset>
 #include <signal.h>
 
 
@@ -37,12 +37,33 @@ struct TrieNode;
 struct TrieLeaf;
 struct TrieState;
 struct DenseTrieNode;
+struct DenseTrieLeaf;
 
 struct TriePtr {
 
     TriePtr()
         : bits(0)
     {
+    }
+
+    template<typename T>
+    TriePtr(T * val)
+        : type(0), ptr((uint64_t)val)
+    {
+        cerr << "TriePtr initialized to " << *this << " from "
+             << val << endl;
+    }
+
+    template<typename T>
+    TriePtr & operator = (T * val)
+    {
+        type = 0;
+        ptr = (uint64_t)val;
+
+        cerr << "TriePtr initialized to " << *this << " from "
+             << val << endl;
+
+        return *this;
     }
 
     union {
@@ -57,13 +78,16 @@ struct TriePtr {
 
     // Match the next part of the key, returning the pointer that matched.
     // If no pointer matched then return the null pointer.
-    std::pair<TriePtr, int> match(const char * key) const;
-
-    // Insert the given key, updating the state as we go
-    void insert(TrieState & state);
+    TriePtr match(TrieState & state) const;
+    
+    // Insert the given key, updating the state as we go.  The returned
+    // value is the new value that this TriePtr should take; it's used
+    // (for example) when the current node gets too full and needs to be
+    // reallocated.
+    TriePtr insert(TrieState & state);
 
     // Get the leaf for a leaf node
-    uint64_t & leaf() const;
+    uint64_t & leaf(TrieState & state) const;
 
     // Make null
     void clear()
@@ -71,10 +95,33 @@ struct TriePtr {
         bits = 0;
     }
 
-    TriePtr & operator = (DenseTrieNode * node)
+    size_t memusage(int depth) const;
+
+
+    //private:
+    void set_node(DenseTrieNode * node)
     {
         ptr = (uint64_t)node;
-        return *this;
+    }
+
+    void set_node(DenseTrieLeaf * node)
+    {
+        ptr = (uint64_t)node;
+    }
+
+    void set_node(uint64_t * val)
+    {
+        ptr = (uint64_t)val;
+    }
+
+    bool operator == (const TriePtr & other) const
+    {
+        return ptr == other.ptr;
+    }
+
+    bool operator != (const TriePtr & other) const
+    {
+        return ptr != other.ptr;
     }
 
     template<typename T>
@@ -83,15 +130,30 @@ struct TriePtr {
         return (T *)ptr;
     }
 
-    size_t memusage() const;
+    template<typename Node>
+    TriePtr
+    do_match_as(TrieState & state) const;
+
+    template<typename Node>
+    TriePtr
+    do_insert_as(TrieState & state);
+
+    std::string print() const
+    {
+        return format("%012x", ptr);
+    }
 };
+
+std::ostream & operator << (std::ostream & stream, const TriePtr & p)
+{
+    return stream << p.print();
+}
 
 struct TrieState {
     TrieState(const char * key, TriePtr root)
         : key(key), depth(0), nparents(1)
     {
         parents[0] = root;
-        find();
     }
     
     const char * key;
@@ -102,8 +164,6 @@ struct TrieState {
 
     void push_back(TriePtr parent)
     {
-        if (!parent)
-            throw Exception("no parent");
         parents[nparents++] = parent;
     }
 
@@ -112,149 +172,90 @@ struct TrieState {
         depth += nchars;
         key += nchars;
     }
-    
-    void find()
+
+    void dump(std::ostream & stream) const
     {
-        while (depth < 8) {
-            std::pair<TriePtr, int> matched = back().match(key);
-            const TriePtr & next = matched.first;
-            if (next) return;
-            int nmatched = matched.second;
-            this->matched(nmatched);
-            push_back(next);
+        stream << "state: " << endl;
+        stream << "  depth: " << depth << endl;
+        stream << "  key:   ";
+        const char * old_key = key - depth;
+
+        for (unsigned i = 0;  i < 8;  ++i) {
+            if (i == depth) stream << "| ";
+            stream << format("%02x ",
+                             (old_key[i] < 0 ? old_key[i] + 256 : old_key[i]));
+        }
+        stream << endl;
+
+        stream << "  nparents: " << nparents << endl;
+        for (unsigned i = 0;  i < nparents;  ++i) {
+            stream << "    " << i << ": " << parents[i] << endl;
         }
     }
 };
 
-#if 0
-// Dense node: only one character; 256 pointers
-// Bitmap node: only one character entries + some pointers
-// Sparse node: from 1 to 8 characters; up to 128 (?) entries
-
-template<int N>
-struct TrieNode {
-
-    enum {
-        TOTAL_BYTES = 512,
-        DATA_BYTES  = TOTAL_BYTES - 4,  // for the sizes and padding
-        BYTES_PER_ENTRY = N + 8,        // key, payload
-        NENTRIES = DATA_BYTES / BYTES_PER_ENTRY
-    };
-
-    size_t memusage() const
-    {
-        size_t result = 0;
-        for (unsigned i = 0;  i < 256;  ++i)
-            result += children[i].memusage();
-        return result;
-    }
-
-    std::pair<TriePtr, int>
-    match(const char * key) const
-    {
-        int index = -1;
-        // Binary search on the keys
-        int i0 = 0, i1 = size;
-        
-        for (;;) {
-            int i = (i0 + i1) / 2;
-            const char * k = decodes + width * i;
-            
-            int cmp = strncmp(key, k, width);
-            
-            if (cmp == 0) {
-                index = i;
-                break;
-            }
-            else if (cmp == -1) i1 = i;
-            else i0 = i;
-            
-            if (i0 == i1) return std::make_pair(TreePtr, 0);
-        }
-        
-        if (index < 0) index += 256;
-
-        if (!payloads()[index])
-            return 0;
-        
-        if (last_level)
-            return payloads()[index];
-        else {
-            // Try to match width characters starting at key and return the
-            // pointer if it matches
-            const char * next_key = key + width;
-
-            return payloads()[index].node->lookup(key + width);
-        }
-        
-        return 0;
-    }
-
-    /// How many characters does it match?
-    uint8_t nmatched;
-    
-    /// How many entries are in the array?
-    uint8_t size;
-
-    char decodes[0];
-
-    TriePtr * payloads() const
-    {
-        return decodes + size * 3;
-    }
-
-    /// The entries
-    struct Entry {
-        uint64_t prefix;
-        TriePtr payload;
-    };
-
-    Entry entries[0];
-};
-
-#endif
+std::ostream & operator << (std::ostream & stream, const TrieState & state)
+{
+    state.dump(stream);
+    return stream;
+}
 
 struct DenseTrieNode {
 
     DenseTrieNode()
     {
-        for (unsigned i = 0;  i < 256;  ++i)
-            children[i].clear();
+        cerr << "new node" << endl;
     }
 
-    std::pair<TriePtr, int>
-    match(const char * key)
+    static int width()
+    {
+        return 1;
+    }
+
+    typedef TriePtr value_type;
+    typedef value_type * iterator;
+    typedef const value_type * const_iterator;
+
+    // Attempt to match width() characters from the key.  If it matches, then
+    // return a pointer to the next node.  If there was no match, return a
+    // null pointer.
+    const_iterator match(const char * key) const
     {
         int index = *key;
         if (index < 0) index += 256;
-        return make_pair(children[index], 1);
+        return &children[index];
     }
 
-    void insert(TrieState & state)
+    // Insert width() characters from the key into the map.  Returns the
+    // iterator to access the next level.  Note that the iterator may be
+    // null; in this case the node was full and will need to be expanded.
+    iterator insert(const char * key)
     {
-        if (state.depth == 8)
-            throw Exception("insert too deep");
-        if (state.depth == 7)
-            return;
-
-        int index = *state.key;
+        int index = *key;
         if (index < 0) index += 256;
-        
-        if (!children[index]) {
-            children[index] = new DenseTrieNode();
-            // TODO: we know the type of the next one; could avoid redirection
-        }
-        
-        state.push_back(children[index]);
-        state.matched(1);
-        children[index].insert(state);
+        return &children[index];
+    }
+
+    void set_ptr(iterator it, TriePtr new_ptr)
+    {
+        *it = new_ptr;
+    }
+
+    bool not_null(const_iterator it) const
+    {
+        return it;
     }
     
-    size_t memusage()
+    value_type dereference(const_iterator it) const
+    {
+        return *it;
+    }
+
+    size_t memusage(int depth) const
     {
         size_t result = sizeof(*this);
         for (unsigned i = 0;  i < 256;  ++i)
-            result += children[i].memusage();
+            result += children[i].memusage(depth + 1);
         return result;
     }
 
@@ -262,14 +263,63 @@ struct DenseTrieNode {
 };
 
 struct DenseTrieLeaf {
-    uint64_t presence[4];  // one bit per leaf
-    uint64_t leaves[256];
-
-    size_t memusage()
+    DenseTrieLeaf()
+    {
+        cerr << "new leaf" << endl;
+        memset(this, 0, sizeof(this));
+    }
+    
+    size_t memusage(int depth)
     {
         size_t result = sizeof(*this);
         return result;
     }
+
+    static int width() { return 1; }
+
+    typedef TriePtr value_type;
+    typedef uint64_t * iterator;
+    typedef const uint64_t * const_iterator;
+
+    // Attempt to match width() characters from the key.  If it matches, then
+    // return a pointer to the next node.  If there was no match, return a
+    // null pointer.
+    const_iterator match(const char * key) const
+    {
+        int index = *key;
+        if (index < 0) index += 256;
+        if (!presence[index]) return 0;
+        return &leaves[index];
+    }
+
+    // Insert width() characters from the key into the map.  Returns the
+    // iterator to access the next level.  Note that the iterator may be
+    // null; in this case the node was full and will need to be expanded.
+    iterator insert(const char * key)
+    {
+        int index = *key;
+        if (index < 0) index += 256;
+        if (!presence[index]) presence.set(index);
+        return &leaves[index];
+    }
+
+    void set_ptr(iterator it, TriePtr new_ptr)
+    {
+        throw Exception("leaf doesn't support set_ptr");
+    }
+
+    bool not_null(const_iterator it) const
+    {
+        return it;
+    }
+
+    value_type dereference(const_iterator it) const
+    {
+        return TriePtr(it);
+    }
+
+    std::bitset<256> presence;  // one bit per leaf; says if it's there or not
+    uint64_t leaves[256];
 };
 
 
@@ -279,27 +329,126 @@ struct DenseTrieLeaf {
 
 size_t
 TriePtr::
-memusage() const
+memusage(int depth) const
 {
     if (ptr == 0) return 0;
-    DenseTrieNode * p = as<DenseTrieNode>();
-    return p->memusage();
+    if (depth > 7)
+        throw Exception("memusage(): invalid depth");
+
+    bool is_leaf = depth == 7;
+
+    if (is_leaf)
+        return as<DenseTrieLeaf>()->memusage(depth);
+    else return as<DenseTrieNode>()->memusage(depth);
 }
 
-std::pair<TriePtr, int>
+template<typename Node>
+TriePtr
 TriePtr::
-match(const char * key) const
+do_match_as(TrieState & state) const
 {
-    DenseTrieNode * p = as<DenseTrieNode>();
-    return p->match(key);
+    if (!ptr) return *this;
+
+    const Node * node = as<Node>();
+
+    typename Node::const_iterator found
+        = node->match(state.key);
+
+    TriePtr result;
+    if (node->not_null(found) && (result = node->dereference(found))) {
+        state.matched(node->width());
+        state.push_back(result);
+        return result.match(state);
+    }
+    
+    return result;
 }
 
-void
+TriePtr
+TriePtr::
+match(TrieState & state) const
+{
+    if (!ptr) return *this;
+
+    if (state.depth == 8)
+        return *this;
+
+    bool is_leaf = state.depth == 7;
+    
+    if (is_leaf)
+        return do_match_as<DenseTrieLeaf>(state);
+    else return do_match_as<DenseTrieNode>(state);
+}
+
+template<typename Node>
+TriePtr
+TriePtr::
+do_insert_as(TrieState & state)
+{
+    Node * node = as<Node>();
+
+    cerr << "node = " << node << endl;
+
+    int parent = state.nparents;
+
+    if (!ptr) node = new Node();
+
+    typename Node::iterator found
+        = node->insert(state.key);
+
+    if (node->not_null(found)) {
+        TriePtr child = TriePtr(node->dereference(found));
+        state.matched(node->width());
+        state.push_back(child);
+
+        TriePtr new_child = child.insert(state);
+
+        cerr << "new_child = " << new_child << " child = " << child << endl;
+
+        // Do we need to update our pointer?
+        if (new_child != child) {
+            cerr << "new_child update" << endl;
+            node->set_ptr(found, new_child);
+            state.parents[parent] = new_child;
+        }
+
+        cerr << "finished parent " << parent << " node = " << node
+             << " this = " << *this << endl;
+
+        return TriePtr(node);
+    }
+    
+    throw Exception("node insert failed; need to change to new kind of node");
+}
+
+TriePtr
 TriePtr::
 insert(TrieState & state)
 {
-    DenseTrieNode * p = as<DenseTrieNode>();
-    p->insert(state);
+    cerr << "insert" << endl;
+    cerr << state << endl;
+
+    if (state.depth == 8)
+        return *this;
+
+    if (state.depth > 7)
+        throw Exception("create: invalid depth");
+
+    bool is_leaf = state.depth == 7;
+
+    if (is_leaf)
+        return do_insert_as<DenseTrieLeaf>(state);
+    else return do_insert_as<DenseTrieNode>(state);
+}
+
+uint64_t &
+TriePtr::
+leaf(TrieState & state) const
+{
+    if (state.depth != 8)
+        throw Exception("state depth wrong");
+    uint64_t * p = as<uint64_t>();
+    return *p;
 }
 
 
@@ -313,19 +462,21 @@ struct Trie {
     uint64_t & operator [] (uint64_t key_)
     {
         const char * key = (const char *)&key_;
-
+        
         TrieState state(key, root);
-        state.find();
-        
-        if (state.depth != 8)
-            state.back().insert(state);
-        
-        return state.back().leaf();
+        TriePtr val = root.insert(state);
+        if (root != val)
+            root = val;
+
+        cerr << "after insert" << endl;
+        cerr << "state = " << state << endl;
+
+        return state.back().leaf(state);
     }
     
     size_t memusage() const
     {
-        return root.memusage();
+        return root.memusage(0);
     }
 };
 
