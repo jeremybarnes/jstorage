@@ -31,21 +31,57 @@
 
 
 using namespace ML;
-//using namespace JGraph;
 using namespace std;
 
 struct TrieNode;
 struct TrieLeaf;
+struct TrieState;
+struct DenseTrieNode;
 
 struct TriePtr {
 
-    void * ptr;
+    TriePtr()
+        : bits(0)
+    {
+    }
+
+    union {
+        struct {
+            uint64_t type:2;
+            uint64_t ptr:62;
+        };
+        uint64_t bits;
+    };
 
     JML_IMPLEMENT_OPERATOR_BOOL(ptr);
 
     // Match the next part of the key, returning the pointer that matched.
     // If no pointer matched then return the null pointer.
-    TriePtr match(const char * key);
+    std::pair<TriePtr, int> match(const char * key) const;
+
+    // Insert the given key, updating the state as we go
+    void insert(TrieState & state);
+
+    // Get the leaf for a leaf node
+    uint64_t & leaf() const;
+
+    // Make null
+    void clear()
+    {
+        bits = 0;
+    }
+
+    TriePtr & operator = (DenseTrieNode * node)
+    {
+        ptr = (uint64_t)node;
+        return *this;
+    }
+
+    template<typename T>
+    T * as() const
+    {
+        return (T *)ptr;
+    }
 
     size_t memusage() const;
 };
@@ -55,6 +91,7 @@ struct TrieState {
         : key(key), depth(0), nparents(1)
     {
         parents[0] = root;
+        find();
     }
     
     const char * key;
@@ -62,26 +99,48 @@ struct TrieState {
     int nparents;
     TriePtr parents[9];
     TriePtr & back() { return parents[nparents - 1]; }
+
+    void push_back(TriePtr parent)
+    {
+        if (!parent)
+            throw Exception("no parent");
+        parents[nparents++] = parent;
+    }
+
+    void matched(int nchars)
+    {
+        depth += nchars;
+        key += nchars;
+    }
     
     void find()
     {
         while (depth < 8) {
-            TriePtr next = back().match(key);
-            if (!next) return;
-            int nmatched = back().depth();
-            depth += nmatched;
-            key += nmatched;
-            parents[nparents++] = next;
+            std::pair<TriePtr, int> matched = back().match(key);
+            const TriePtr & next = matched.first;
+            if (next) return;
+            int nmatched = matched.second;
+            this->matched(nmatched);
+            push_back(next);
         }
     }
 };
 
-
+#if 0
 // Dense node: only one character; 256 pointers
 // Bitmap node: only one character entries + some pointers
 // Sparse node: from 1 to 8 characters; up to 128 (?) entries
 
+template<int N>
 struct TrieNode {
+
+    enum {
+        TOTAL_BYTES = 512,
+        DATA_BYTES  = TOTAL_BYTES - 4,  // for the sizes and padding
+        BYTES_PER_ENTRY = N + 8,        // key, payload
+        NENTRIES = DATA_BYTES / BYTES_PER_ENTRY
+    };
+
     size_t memusage() const
     {
         size_t result = 0;
@@ -90,35 +149,30 @@ struct TrieNode {
         return result;
     }
 
-    uint64_t * lookup(const char * key) const
+    std::pair<TriePtr, int>
+    match(const char * key) const
     {
         int index = -1;
-        if (type == DENSE) index = *key;
-        else {
-            // Binary search on the keys
-            int i0 = 0, i1 = size;
-
-            for (;;) {
-                int i = (i0 + i1) / 2;
-                const char * k = decodes + width * i;
-
-                int cmp = strncmp(key, k, width);
-
-                if (cmp == 0) {
-                    index = i;
-                    break;
-                }
-                else if (cmp == -1) i1 = i;
-                else i0 = i;
-
-                if (i0 == i1) return 0;
+        // Binary search on the keys
+        int i0 = 0, i1 = size;
+        
+        for (;;) {
+            int i = (i0 + i1) / 2;
+            const char * k = decodes + width * i;
+            
+            int cmp = strncmp(key, k, width);
+            
+            if (cmp == 0) {
+                index = i;
+                break;
             }
+            else if (cmp == -1) i1 = i;
+            else i0 = i;
+            
+            if (i0 == i1) return std::make_pair(TreePtr, 0);
         }
-
+        
         if (index < 0) index += 256;
-
-        // Last level?
-        bool last_level = (depth + width == 8);
 
         if (!payloads()[index])
             return 0;
@@ -132,36 +186,15 @@ struct TrieNode {
 
             return payloads()[index].node->lookup(key + width);
         }
-
+        
         return 0;
     }
 
-    uint64_t & insert(const char * key)
-    {
-        // 1.  Find where to insert it
-        State state(key, root);
-        state.find();
-
-        // 2.  Is it already there?
-        if (state.depth == 8)
-            return state.back().leaf();
-        
-        // 3.  If not, we need to insert the new key under the last
-        //     parent
-        state.back().insert(state);
-    }
-
-    /// How deep?
-    int depth;
-
-    /// Which type?
-    int type;  
-
     /// How many characters does it match?
-    int width;
+    uint8_t nmatched;
     
     /// How many entries are in the array?
-    int size;
+    uint8_t size;
 
     char decodes[0];
 
@@ -169,7 +202,6 @@ struct TrieNode {
     {
         return decodes + size * 3;
     }
-    
 
     /// The entries
     struct Entry {
@@ -180,39 +212,117 @@ struct TrieNode {
     Entry entries[0];
 };
 
-struct TrieLeaf {
-    uint64_t key;
-    uint64_t payload;
+#endif
 
-    size_t memusage() const
+struct DenseTrieNode {
+
+    DenseTrieNode()
     {
-        return 8;
+        for (unsigned i = 0;  i < 256;  ++i)
+            children[i].clear();
+    }
+
+    std::pair<TriePtr, int>
+    match(const char * key)
+    {
+        int index = *key;
+        if (index < 0) index += 256;
+        return make_pair(children[index], 1);
+    }
+
+    void insert(TrieState & state)
+    {
+        if (state.depth == 8)
+            throw Exception("insert too deep");
+        if (state.depth == 7)
+            return;
+
+        int index = *state.key;
+        if (index < 0) index += 256;
+        
+        if (!children[index]) {
+            children[index] = new DenseTrieNode();
+            // TODO: we know the type of the next one; could avoid redirection
+        }
+        
+        state.push_back(children[index]);
+        state.matched(1);
+        children[index].insert(state);
+    }
+    
+    size_t memusage()
+    {
+        size_t result = sizeof(*this);
+        for (unsigned i = 0;  i < 256;  ++i)
+            result += children[i].memusage();
+        return result;
+    }
+
+    TriePtr children[256];
+};
+
+struct DenseTrieLeaf {
+    uint64_t presence[4];  // one bit per leaf
+    uint64_t leaves[256];
+
+    size_t memusage()
+    {
+        size_t result = sizeof(*this);
+        return result;
     }
 };
+
+
+/*****************************************************************************/
+/* TRIEPTR                                                                   */
+/*****************************************************************************/
 
 size_t
 TriePtr::
 memusage() const
 {
-    if (is_node) {
-        if (!node) return 0;
-        return node->memusage();
-    }
-    else {
-        if (!leaf) return 0;
-        return leaf->memusage();
-    }
+    if (ptr == 0) return 0;
+    DenseTrieNode * p = as<DenseTrieNode>();
+    return p->memusage();
 }
 
-struct TrieIterator {
-    
-};
+std::pair<TriePtr, int>
+TriePtr::
+match(const char * key) const
+{
+    DenseTrieNode * p = as<DenseTrieNode>();
+    return p->match(key);
+}
+
+void
+TriePtr::
+insert(TrieState & state)
+{
+    DenseTrieNode * p = as<DenseTrieNode>();
+    p->insert(state);
+}
+
+
+/*****************************************************************************/
+/* TRIE                                                                      */
+/*****************************************************************************/
 
 struct Trie {
     TriePtr root;
 
-    uint64_t & operator [] (uint64_t key);
+    uint64_t & operator [] (uint64_t key_)
+    {
+        const char * key = (const char *)&key_;
 
+        TrieState state(key, root);
+        state.find();
+        
+        if (state.depth != 8)
+            state.back().insert(state);
+        
+        return state.back().leaf();
+    }
+    
     size_t memusage() const
     {
         return root.memusage();
