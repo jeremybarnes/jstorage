@@ -50,8 +50,8 @@ struct TriePtr {
     TriePtr(T * val)
         : type(0), ptr((uint64_t)val)
     {
-        cerr << "TriePtr initialized to " << *this << " from "
-             << val << endl;
+        //cerr << "TriePtr initialized to " << *this << " from "
+        //     << val << endl;
     }
 
     template<typename T>
@@ -60,8 +60,8 @@ struct TriePtr {
         type = 0;
         ptr = (uint64_t)val;
 
-        cerr << "TriePtr initialized to " << *this << " from "
-             << val << endl;
+        //cerr << "TriePtr initialized to " << *this << " from "
+        //     << val << endl;
 
         return *this;
     }
@@ -204,7 +204,7 @@ struct DenseTrieNode {
 
     DenseTrieNode()
     {
-        cerr << "new node" << endl;
+        //cerr << "new node" << endl;
     }
 
     static int width()
@@ -265,7 +265,7 @@ struct DenseTrieNode {
 struct DenseTrieLeaf {
     DenseTrieLeaf()
     {
-        cerr << "new leaf" << endl;
+        //cerr << "new leaf" << endl;
         memset(this, 0, sizeof(this));
     }
     
@@ -387,7 +387,7 @@ do_insert_as(TrieState & state)
 {
     Node * node = as<Node>();
 
-    cerr << "node = " << node << endl;
+    //cerr << "node = " << node << endl;
 
     int parent = state.nparents;
 
@@ -403,17 +403,17 @@ do_insert_as(TrieState & state)
 
         TriePtr new_child = child.insert(state);
 
-        cerr << "new_child = " << new_child << " child = " << child << endl;
+        //cerr << "new_child = " << new_child << " child = " << child << endl;
 
         // Do we need to update our pointer?
         if (new_child != child) {
-            cerr << "new_child update" << endl;
+            //cerr << "new_child update" << endl;
             node->set_ptr(found, new_child);
             state.parents[parent] = new_child;
         }
 
-        cerr << "finished parent " << parent << " node = " << node
-             << " this = " << *this << endl;
+        //cerr << "finished parent " << parent << " node = " << node
+        //     << " this = " << *this << endl;
 
         return TriePtr(node);
     }
@@ -425,8 +425,8 @@ TriePtr
 TriePtr::
 insert(TrieState & state)
 {
-    cerr << "insert" << endl;
-    cerr << state << endl;
+    //cerr << "insert" << endl;
+    //cerr << state << endl;
 
     if (state.depth == 8)
         return *this;
@@ -468,8 +468,8 @@ struct Trie {
         if (root != val)
             root = val;
 
-        cerr << "after insert" << endl;
-        cerr << "state = " << state << endl;
+        //cerr << "after insert" << endl;
+        //cerr << "state = " << state << endl;
 
         return state.back().leaf(state);
     }
@@ -494,4 +494,21 @@ BOOST_AUTO_TEST_CASE( test_trie )
     trie[0] = 10;
 
     BOOST_CHECK_EQUAL(trie[0], 10);
+
+    cerr << "memusage(trie) = " << memusage(trie) << endl;
+
+    trie[1] = 20;
+
+    BOOST_CHECK_EQUAL(trie[0], 10);
+    BOOST_CHECK_EQUAL(trie[1], 20);
+
+    cerr << "memusage(trie) = " << memusage(trie) << endl;
+
+    trie[0x1000000000000000ULL] = 30;
+
+    BOOST_CHECK_EQUAL(trie[0], 10);
+    BOOST_CHECK_EQUAL(trie[1], 20);
+    BOOST_CHECK_EQUAL(trie[0x1000000000000000ULL], 30);
+
+    cerr << "memusage(trie) = " << memusage(trie) << endl;
 }
