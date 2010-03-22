@@ -253,10 +253,11 @@ commit(Epoch new_epoch, void * setup_data) throw ()
     // We need to record the actual values on this table
     PVOManagerVersion::reserialize(read(), setup_data, *store());
 
-    PVOManagerVersion * new_table
-        = (PVOManagerVersion *)current_trans->set_local_value(this, 0).first;
 
-    PVOManagerVersion * old_table = set_last_value(new_table);
+    PVOManagerVersion * old_table
+        = set_last_value(new PVOManagerVersion(read()));
+
+
     delete old_table; // TODO: should be deleted later
 
     //cerr << "3.  Underlying" << endl;

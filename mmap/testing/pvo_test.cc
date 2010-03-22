@@ -543,7 +543,7 @@ struct Object_Test_Thread2 {
 
             }
 
-            if (true /* one thread only */) {
+            if (false /* one thread only */) {
                 Local_Transaction trans;
 
                 if (var1 != var2)
@@ -630,7 +630,7 @@ BOOST_AUTO_TEST_CASE( stress_test )
     cerr << endl << endl << "========= test 2: multiple variables" << endl;
     
     run_object_test2<int>(1,  5000, 2);
-    //run_object_test2<int>(2,  5000, 2);
+    run_object_test2<int>(2,  5000, 2);
 
 #if 0
     run_object_test2<Versioned2<int> >(2,  5000, 2);

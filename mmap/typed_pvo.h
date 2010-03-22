@@ -265,6 +265,11 @@ protected:
         return result;
     }
         
+    T * get_last_value() const
+    {
+        return version_table->back().value;
+    }
+
 public:
     // Implement object interface
 
