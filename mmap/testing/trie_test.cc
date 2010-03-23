@@ -39,6 +39,56 @@ struct TrieState;
 struct DenseTrieNode;
 struct DenseTrieLeaf;
 
+/** Base class for an allocator.  */
+struct TrieAllocator {
+    virtual ~TrieAllocator() {}
+    virtual void * allocate(size_t bytes) = 0;
+    virtual void deallocate(void * mem, size_t bytes) = 0;
+
+    template<typename T>
+    T * create()
+    {
+        size_t bytes = sizeof(T);
+        void * addr = allocate(bytes);
+        try {
+            return new (addr) T();
+        } catch (...) {
+            deallocate(addr, bytes);
+            throw;
+        }
+    }
+};
+
+/** Template to wrap an STL-like allocator into a standard allocator.  These
+    objects will be created on-the-fly, so it is important that they be
+    lightweight.
+*/
+template<class Allocator>
+struct TrieAllocatorAdaptor : public TrieAllocator {
+
+    TrieAllocatorAdaptor(const Allocator & allocator = Allocator())
+        : allocator(allocator)
+    {
+    }
+
+    virtual ~TrieAllocatorAdaptor()
+    {
+    }
+
+    virtual void * allocate(size_t bytes)
+    {
+        return allocator.allocate(bytes);
+    }
+
+    virtual void deallocate(void * mem, size_t bytes)
+    {
+        allocator.deallocate((char *)mem, bytes);
+    }
+
+    Allocator allocator;
+};
+
+
 struct TriePtr {
 
     TriePtr()
@@ -157,12 +207,20 @@ std::ostream & operator << (std::ostream & stream, const TriePtr & p)
 }
 
 struct TrieState {
-    TrieState(const char * key, TriePtr root)
-        : key(key), depth(0), nparents(1)
+    template<typename Alloc>
+    TrieState(const char * key, TriePtr root, Alloc & allocator)
+        : key(key), depth(0), nparents(1),
+          allocator(*reinterpret_cast<TrieAllocator *>(alloc_space))
     {
-        parents[0] = root;
+        BOOST_STATIC_ASSERT(sizeof(TrieAllocatorAdaptor<Alloc>) <= 256);
+        new (alloc_space) TrieAllocatorAdaptor<Alloc>(allocator);
     }
     
+    ~TrieState()
+    {
+        allocator.~TrieAllocator();
+    }
+
     const char * key;
     int depth;
     int nparents;
@@ -199,6 +257,10 @@ struct TrieState {
             stream << "    " << i << ": " << parents[i] << endl;
         }
     }
+
+    // Space for the allocator to be constructed
+    char alloc_space[256];
+    TrieAllocator & allocator;
 };
 
 std::ostream & operator << (std::ostream & stream, const TrieState & state)
@@ -347,6 +409,8 @@ struct DenseTrieLeaf {
 /* TRIEPTR                                                                   */
 /*****************************************************************************/
 
+// Macro that will figure out what the type of the node is and coerce it into
+// the correct type before calling the given method on it
 #define TRIE_SWITCH_ON_TYPE(depth, action, args)                        \
     {                                                                   \
         if (depth > 7)                                                  \
@@ -414,7 +478,7 @@ do_insert_as(TrieState & state)
 
     int parent = state.nparents;
 
-    if (!ptr) node = new Node();
+    if (!ptr) node = state.allocator.create<Node>();
 
     typename Node::iterator found
         = node->insert(state.key);
@@ -485,43 +549,60 @@ size(int depth) const
 /* TRIE                                                                      */
 /*****************************************************************************/
 
+template<typename Alloc = std::allocator<char> >
 struct Trie {
-    TriePtr root;
+    Trie(const Alloc & alloc = Alloc())
+        : itl(alloc)
+    {
+    }
+
+    // Use the empty base class trick to avoid memory allocation if
+    // sizeof(Alloc) == 0
+    struct Itl : public Alloc {
+        Itl(const Alloc & alloc)
+            : Alloc(alloc)
+        {
+        }
+
+        TriePtr root;
+        
+        Alloc & allocator() { return *this; }
+    } itl;
 
     uint64_t & operator [] (uint64_t key_)
     {
         const char * key = (const char *)&key_;
         
-        TrieState state(key, root);
-        TriePtr val = root.insert(state);
-        if (root != val)
-            root = val;
-
-        //cerr << "after insert" << endl;
-        //cerr << "state = " << state << endl;
+        TrieState state(key, itl.root, itl.allocator());
+        TriePtr val = itl.root.insert(state);
+        if (itl.root != val)
+            itl.root = val;
 
         return state.back().leaf(state);
     }
 
     size_t size() const
     {
-        return root.size(0);
+        return itl.root.size(0);
     }
     
     size_t memusage() const
     {
-        return root.memusage(0);
+        return itl.root.memusage(0);
     }
 };
 
-size_t memusage(const Trie & trie)
+template<typename Alloc>
+size_t memusage(const Trie<Alloc> & trie)
 {
     return trie.memusage();
 }
 
 BOOST_AUTO_TEST_CASE( test_trie )
 {
-    Trie trie;
+    Trie<> trie;
+
+    BOOST_CHECK_EQUAL(sizeof(Trie<>), 8);
 
     BOOST_CHECK_EQUAL(memusage(trie), 0);
     BOOST_CHECK_EQUAL(trie.size(), 0);
