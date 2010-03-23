@@ -15,6 +15,8 @@
 #include "jml/utils/testing/testing_allocator.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
+#include <boost/utility/enable_if.hpp>
+#include <boost/type_traits/is_same.hpp>
 #include <iostream>
 #include "jml/utils/guard.h"
 #include <boost/bind.hpp>
@@ -29,8 +31,6 @@ using namespace std;
 struct TrieNode;
 struct TrieLeaf;
 struct TrieState;
-struct DenseTrieNode;
-struct DenseTrieLeaf;
 
 /** Base class for an allocator.  */
 struct TrieAllocator {
@@ -91,7 +91,7 @@ struct TriePtr {
 
     template<typename T>
     TriePtr(T * val)
-        : type(0), ptr((uint64_t)val)
+        : is_leaf(0), type(0), ptr((uint64_t)val)
     {
         //cerr << "TriePtr initialized to " << *this << " from "
         //     << val << endl;
@@ -111,8 +111,9 @@ struct TriePtr {
 
     union {
         struct {
+            uint64_t is_leaf:1;
             uint64_t type:2;
-            uint64_t ptr:62;
+            uint64_t ptr:61;
         };
         uint64_t bits;
     };
@@ -121,7 +122,7 @@ struct TriePtr {
 
     // Match the next part of the key, returning the pointer that matched.
     // If no pointer matched then return the null pointer.
-    TriePtr match(TrieState & state) const;
+    void match(TrieState & state) const;
     
     // Insert the given key, updating the state as we go.  The returned
     // value is the new value that this TriePtr should take; it's used
@@ -142,19 +143,10 @@ struct TriePtr {
 
 
     //private:
-    void set_node(DenseTrieNode * node)
+    template<typename T>
+    void set_node(T * node)
     {
         ptr = (uint64_t)node;
-    }
-
-    void set_node(DenseTrieLeaf * node)
-    {
-        ptr = (uint64_t)node;
-    }
-
-    void set_node(uint64_t * val)
-    {
-        ptr = (uint64_t)val;
     }
 
     bool operator == (const TriePtr & other) const
@@ -174,8 +166,12 @@ struct TriePtr {
     }
 
     template<typename Node>
-    TriePtr
-    do_match_as(TrieState & state) const;
+    void
+    match_node_as(TrieState & state) const;
+
+    template<typename Node>
+    void
+    match_leaf_as(TrieState & state) const;
 
     template<typename Node>
     TriePtr
@@ -259,25 +255,15 @@ std::ostream & operator << (std::ostream & stream, const TrieState & state)
     return stream;
 }
 
-struct DenseTrieNode {
-
-    DenseTrieNode()
-    {
-        //cerr << "new node" << endl;
-    }
-
-    void free_children(TrieAllocator & allocator, int depth)
-    {
-        for (unsigned i = 0;  i < 256;  ++i)
-            children[i].free(allocator, depth + 1);
-    }
+template<typename Payload>
+struct DenseTrieBase {
 
     static int width()
     {
         return 1;
     }
 
-    typedef TriePtr value_type;
+    typedef Payload value_type;
     typedef value_type * iterator;
     typedef const value_type * const_iterator;
 
@@ -288,6 +274,7 @@ struct DenseTrieNode {
     {
         int index = *key;
         if (index < 0) index += 256;
+        if (!presence[index]) return 0;
         return &children[index];
     }
 
@@ -298,10 +285,11 @@ struct DenseTrieNode {
     {
         int index = *key;
         if (index < 0) index += 256;
+        if (!presence[index]) presence.set(index);
         return &children[index];
     }
 
-    void set_ptr(iterator it, TriePtr new_ptr)
+    void set_ptr(iterator it, Payload new_ptr)
     {
         *it = new_ptr;
     }
@@ -316,6 +304,18 @@ struct DenseTrieNode {
         return *it;
     }
 
+    std::bitset<256> presence;  // one bit per leaf; says if it's there or not
+    Payload children[256];
+};
+
+struct DenseTrieNode : public DenseTrieBase<TriePtr> {
+
+    void free_children(TrieAllocator & allocator, int depth)
+    {
+        for (unsigned i = 0;  i < 256;  ++i)
+            children[i].free(allocator, depth + 1);
+    }
+
     size_t memusage(int depth) const
     {
         size_t result = sizeof(*this);
@@ -328,20 +328,15 @@ struct DenseTrieNode {
     {
         size_t result = 0;
         for (unsigned i = 0;  i < 256;  ++i)
-            result += children[i].size(depth + 1);
+            if (presence[i])
+                result += children[i].size(depth + 1);
         return result;
     }
 
-    TriePtr children[256];
 };
 
-struct DenseTrieLeaf {
-    DenseTrieLeaf()
-    {
-        //cerr << "new leaf" << endl;
-        memset(this, 0, sizeof(this));
-    }
-    
+struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
+
     void free_children(TrieAllocator & allocator, int depth)
     {
     }
@@ -356,52 +351,6 @@ struct DenseTrieLeaf {
     {
         return presence.count();
     }
-
-    static int width() { return 1; }
-
-    typedef TriePtr value_type;
-    typedef uint64_t * iterator;
-    typedef const uint64_t * const_iterator;
-
-    // Attempt to match width() characters from the key.  If it matches, then
-    // return a pointer to the next node.  If there was no match, return a
-    // null pointer.
-    const_iterator match(const char * key) const
-    {
-        int index = *key;
-        if (index < 0) index += 256;
-        if (!presence[index]) return 0;
-        return &leaves[index];
-    }
-
-    // Insert width() characters from the key into the map.  Returns the
-    // iterator to access the next level.  Note that the iterator may be
-    // null; in this case the node was full and will need to be expanded.
-    iterator insert(const char * key)
-    {
-        int index = *key;
-        if (index < 0) index += 256;
-        if (!presence[index]) presence.set(index);
-        return &leaves[index];
-    }
-
-    void set_ptr(iterator it, TriePtr new_ptr)
-    {
-        throw Exception("leaf doesn't support set_ptr");
-    }
-
-    bool not_null(const_iterator it) const
-    {
-        return it;
-    }
-
-    value_type dereference(const_iterator it) const
-    {
-        return TriePtr(it);
-    }
-
-    std::bitset<256> presence;  // one bit per leaf; says if it's there or not
-    uint64_t leaves[256];
 };
 
 
@@ -409,16 +358,25 @@ struct DenseTrieLeaf {
 /* TRIEPTR                                                                   */
 /*****************************************************************************/
 
+#define TRIE_SWITCH_ON_NODE(depth, action, args)                        \
+    do {                                                                \
+        if (depth > 7)                                                  \
+            throw Exception("create: invalid depth");                   \
+        action<DenseTrieNode> args;                                     \
+    } while (0)
+
+#define TRIE_SWITCH_ON_LEAF(depth, action, args)                        \
+    do {                                                                   \
+        if (depth > 7)                                                  \
+            throw Exception("create: invalid depth");                   \
+        action<DenseTrieLeaf> args;                                     \
+    } while (0)
+
 // Macro that will figure out what the type of the node is and coerce it into
 // the correct type before calling the given method on it
 #define TRIE_SWITCH_ON_TYPE(depth, action, args)                        \
-    {                                                                   \
-        if (depth > 7)                                                  \
-            throw Exception("create: invalid depth");                   \
-        bool is_leaf = (depth == 7);                                    \
-        if (is_leaf) action<DenseTrieLeaf> args;                        \
-        else         action<DenseTrieNode> args;                        \
-    }
+    if (is_leaf) TRIE_SWITCH_ON_LEAF(depth, action, args);              \
+    else         TRIE_SWITCH_ON_NODE(depth, action, args);
 
 size_t
 TriePtr::
@@ -430,41 +388,55 @@ memusage(int depth) const
 }
 
 template<typename Node>
-TriePtr
+void
 TriePtr::
-do_match_as(TrieState & state) const
+match_node_as(TrieState & state) const
 {
-    if (!ptr) return *this;
+    if (!ptr) return;
 
     const Node * node = as<Node>();
 
     typename Node::const_iterator found
         = node->match(state.key);
 
-    TriePtr result;
+    typename Node::value_type result;
     if (node->not_null(found) && (result = node->dereference(found))) {
         state.matched(node->width());
         state.push_back(result);
-        return result.match(state);
+        result.match(state);
+        return;
     }
     
-    return result;
+    return;
 }
 
-TriePtr
+template<typename Node>
+void
+TriePtr::
+match_leaf_as(TrieState & state) const
+{
+    if (!ptr) return;
+
+    const Node * node = as<Node>();
+
+    typename Node::const_iterator found
+        = node->match(state.key);
+
+    if (node->not_null(found)) {
+        state.matched(node->width());
+        state.push_back(found);
+    }
+}
+
+void
 TriePtr::
 match(TrieState & state) const
 {
-    if (!ptr) return *this;
+    if (!ptr || state.depth == 8) return;
 
-    if (state.depth == 8)
-        return *this;
-
-    bool is_leaf = state.depth == 7;
-    
     if (is_leaf)
-        return do_match_as<DenseTrieLeaf>(state);
-    else return do_match_as<DenseTrieNode>(state);
+        TRIE_SWITCH_ON_LEAF(state.depth, match_leaf_as, (state));
+    else TRIE_SWITCH_ON_NODE(state.depth, match_node_as, (state));
 }
 
 template<typename Node>
@@ -512,13 +484,9 @@ TriePtr
 TriePtr::
 insert(TrieState & state)
 {
-    //cerr << "insert" << endl;
-    //cerr << state << endl;
+    if (is_leaf) return *this;
 
-    if (state.depth == 8)
-        return *this;
-
-    TRIE_SWITCH_ON_TYPE(state.depth, return do_insert_as, (state));
+    TRIE_SWITCH_ON_NODE(state.depth, return do_insert_as, (state));
 }
 
 uint64_t &
