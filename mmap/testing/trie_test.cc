@@ -12,22 +12,15 @@
 #include "jml/arch/exception.h"
 #include "jml/arch/vm.h"
 #include "jml/utils/unnamed_bool.h"
+#include "jml/utils/testing/testing_allocator.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <sys/wait.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <signal.h>
 #include "jml/utils/guard.h"
 #include <boost/bind.hpp>
 #include <fstream>
 #include <vector>
 #include <bitset>
-#include <signal.h>
 
 
 using namespace ML;
@@ -142,11 +135,8 @@ struct TriePtr {
     // How big is the tree?
     size_t size(int depth) const;
 
-    // Make null
-    void clear()
-    {
-        bits = 0;
-    }
+    // Free everything associated with it
+    void free(TrieAllocator & allocator, int depth);
 
     size_t memusage(int depth) const;
 
@@ -276,6 +266,12 @@ struct DenseTrieNode {
         //cerr << "new node" << endl;
     }
 
+    void free_children(TrieAllocator & allocator, int depth)
+    {
+        for (unsigned i = 0;  i < 256;  ++i)
+            children[i].free(allocator, depth + 1);
+    }
+
     static int width()
     {
         return 1;
@@ -346,6 +342,10 @@ struct DenseTrieLeaf {
         memset(this, 0, sizeof(this));
     }
     
+    void free_children(TrieAllocator & allocator, int depth)
+    {
+    }
+
     size_t memusage(int depth)
     {
         size_t result = sizeof(*this);
@@ -536,12 +536,26 @@ TriePtr::
 size(int depth) const
 {
     if (!ptr) return 0;
-    if (depth == 8)
-        return 1;
-    if (depth > 7)
-        throw Exception("size(): invalid depth");
     
     TRIE_SWITCH_ON_TYPE(depth, return as, ()->size(depth));
+}
+
+template<typename T>
+void destroy_as(TriePtr & obj, TrieAllocator & allocator, int depth)
+{
+    T * o = obj.as<T>();
+    o->free_children(allocator, depth);
+    o->~T();
+    allocator.deallocate(o, sizeof(T));
+    obj = TriePtr();
+}
+
+void
+TriePtr::
+free(TrieAllocator & allocator, int depth)
+{
+    if (!ptr) return;
+    TRIE_SWITCH_ON_TYPE(depth, destroy_as, (*this, allocator, depth));
 }
 
 
@@ -568,6 +582,12 @@ struct Trie {
         
         Alloc & allocator() { return *this; }
     } itl;
+
+    ~Trie()
+    {
+        TrieAllocatorAdaptor<Alloc> allocator(itl.allocator());
+        itl.root.free(allocator, 0);
+    }
 
     uint64_t & operator [] (uint64_t key_)
     {
@@ -630,4 +650,27 @@ BOOST_AUTO_TEST_CASE( test_trie )
     BOOST_CHECK_EQUAL(trie.size(), 3);
 
     cerr << "memusage(trie) = " << memusage(trie) << endl;
+}
+
+BOOST_AUTO_TEST_CASE( test_all_memory_freed )
+{
+    Testing_Allocator_Data data;
+    Testing_Allocator allocator(data);
+
+    {
+        Trie<Testing_Allocator> trie(allocator);
+
+        BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+        BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+
+        trie[0] = 10;
+        trie[1] = 20;
+        trie[0x1000000000000000ULL] = 30;
+
+        BOOST_CHECK(data.bytes_outstanding > 0);
+        BOOST_CHECK(data.objects_outstanding > 0);
+    }
+
+    BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+    BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 }
