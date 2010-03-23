@@ -89,6 +89,9 @@ struct TriePtr {
     // Get the leaf for a leaf node
     uint64_t & leaf(TrieState & state) const;
 
+    // How big is the tree?
+    size_t size(int depth) const;
+
     // Make null
     void clear()
     {
@@ -137,6 +140,10 @@ struct TriePtr {
     template<typename Node>
     TriePtr
     do_insert_as(TrieState & state);
+
+    template<typename Node>
+    size_t
+    do_size_as(int depth) const;
 
     std::string print() const
     {
@@ -259,6 +266,14 @@ struct DenseTrieNode {
         return result;
     }
 
+    size_t size(int depth)
+    {
+        size_t result = 0;
+        for (unsigned i = 0;  i < 256;  ++i)
+            result += children[i].size(depth + 1);
+        return result;
+    }
+
     TriePtr children[256];
 };
 
@@ -273,6 +288,11 @@ struct DenseTrieLeaf {
     {
         size_t result = sizeof(*this);
         return result;
+    }
+
+    size_t size(int depth)
+    {
+        return presence.count();
     }
 
     static int width() { return 1; }
@@ -327,19 +347,22 @@ struct DenseTrieLeaf {
 /* TRIEPTR                                                                   */
 /*****************************************************************************/
 
+#define TRIE_SWITCH_ON_TYPE(depth, action, args)                        \
+    {                                                                   \
+        if (depth > 7)                                                  \
+            throw Exception("create: invalid depth");                   \
+        bool is_leaf = (depth == 7);                                    \
+        if (is_leaf) action<DenseTrieLeaf> args;                        \
+        else         action<DenseTrieNode> args;                        \
+    }
+
 size_t
 TriePtr::
 memusage(int depth) const
 {
     if (ptr == 0) return 0;
-    if (depth > 7)
-        throw Exception("memusage(): invalid depth");
 
-    bool is_leaf = depth == 7;
-
-    if (is_leaf)
-        return as<DenseTrieLeaf>()->memusage(depth);
-    else return as<DenseTrieNode>()->memusage(depth);
+    TRIE_SWITCH_ON_TYPE(depth, return as, ()->memusage(depth));
 }
 
 template<typename Node>
@@ -431,14 +454,7 @@ insert(TrieState & state)
     if (state.depth == 8)
         return *this;
 
-    if (state.depth > 7)
-        throw Exception("create: invalid depth");
-
-    bool is_leaf = state.depth == 7;
-
-    if (is_leaf)
-        return do_insert_as<DenseTrieLeaf>(state);
-    else return do_insert_as<DenseTrieNode>(state);
+    TRIE_SWITCH_ON_TYPE(state.depth, return do_insert_as, (state));
 }
 
 uint64_t &
@@ -449,6 +465,19 @@ leaf(TrieState & state) const
         throw Exception("state depth wrong");
     uint64_t * p = as<uint64_t>();
     return *p;
+}
+
+size_t
+TriePtr::
+size(int depth) const
+{
+    if (!ptr) return 0;
+    if (depth == 8)
+        return 1;
+    if (depth > 7)
+        throw Exception("size(): invalid depth");
+    
+    TRIE_SWITCH_ON_TYPE(depth, return as, ()->size(depth));
 }
 
 
@@ -473,6 +502,11 @@ struct Trie {
 
         return state.back().leaf(state);
     }
+
+    size_t size() const
+    {
+        return root.size(0);
+    }
     
     size_t memusage() const
     {
@@ -490,10 +524,12 @@ BOOST_AUTO_TEST_CASE( test_trie )
     Trie trie;
 
     BOOST_CHECK_EQUAL(memusage(trie), 0);
+    BOOST_CHECK_EQUAL(trie.size(), 0);
 
     trie[0] = 10;
 
     BOOST_CHECK_EQUAL(trie[0], 10);
+    BOOST_CHECK_EQUAL(trie.size(), 1);
 
     cerr << "memusage(trie) = " << memusage(trie) << endl;
 
@@ -501,6 +537,7 @@ BOOST_AUTO_TEST_CASE( test_trie )
 
     BOOST_CHECK_EQUAL(trie[0], 10);
     BOOST_CHECK_EQUAL(trie[1], 20);
+    BOOST_CHECK_EQUAL(trie.size(), 2);
 
     cerr << "memusage(trie) = " << memusage(trie) << endl;
 
@@ -509,6 +546,7 @@ BOOST_AUTO_TEST_CASE( test_trie )
     BOOST_CHECK_EQUAL(trie[0], 10);
     BOOST_CHECK_EQUAL(trie[1], 20);
     BOOST_CHECK_EQUAL(trie[0x1000000000000000ULL], 30);
+    BOOST_CHECK_EQUAL(trie.size(), 3);
 
     cerr << "memusage(trie) = " << memusage(trie) << endl;
 }
