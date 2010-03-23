@@ -12,18 +12,19 @@
 #include "jml/utils/vector_utils.h"
 #include "jml/utils/pair_utils.h"
 #include "jml/utils/hash_map.h"
+#include "jml/utils/testing/testing_allocator.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
 #include "jmvcc/version_table.h"
 #include "jml/utils/testing/live_counting_obj.h"
-#include "jml/utils/testing/testing_allocator.h"
 
 using namespace ML;
 using namespace JMVCC;
 using namespace std;
 
 using boost::unit_test::test_suite;
+
 BOOST_AUTO_TEST_CASE( test_version_table_memory1 )
 {
     typedef Version_Table<Obj, No_Cleanup<Obj>, Testing_Allocator> VT;

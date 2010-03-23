@@ -89,6 +89,7 @@ struct TriePtr {
     {
     }
 
+#if 0
     template<typename T>
     TriePtr(T * val)
         : is_leaf(0), type(0), ptr((uint64_t)val)
@@ -108,6 +109,7 @@ struct TriePtr {
 
         return *this;
     }
+#endif
 
     union {
         struct {
@@ -146,6 +148,21 @@ struct TriePtr {
     template<typename T>
     void set_node(T * node)
     {
+        is_leaf = 0;
+        ptr = (uint64_t)node;
+    }
+
+    template<typename T>
+    void set_leaf(T * node)
+    {
+        is_leaf = 1;
+        ptr = (uint64_t)node;
+    }
+
+    template<typename T>
+    void set_payload(T * node)
+    {
+        is_leaf = 1;
         ptr = (uint64_t)node;
     }
 
@@ -366,7 +383,7 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
     } while (0)
 
 #define TRIE_SWITCH_ON_LEAF(depth, action, args)                        \
-    do {                                                                   \
+    do {                                                                \
         if (depth > 7)                                                  \
             throw Exception("create: invalid depth");                   \
         action<DenseTrieLeaf> args;                                     \
@@ -375,8 +392,10 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 // Macro that will figure out what the type of the node is and coerce it into
 // the correct type before calling the given method on it
 #define TRIE_SWITCH_ON_TYPE(depth, action, args)                        \
-    if (is_leaf) TRIE_SWITCH_ON_LEAF(depth, action, args);              \
-    else         TRIE_SWITCH_ON_NODE(depth, action, args);
+    do {                                                                \
+        if (is_leaf) TRIE_SWITCH_ON_LEAF(depth, action, args);          \
+        else         TRIE_SWITCH_ON_NODE(depth, action, args);          \
+    } while (0)
 
 size_t
 TriePtr::
@@ -424,7 +443,9 @@ match_leaf_as(TrieState & state) const
 
     if (node->not_null(found)) {
         state.matched(node->width());
-        state.push_back(found);
+        TriePtr leaf_ptr;
+        leaf_ptr.set_payload(found);
+        state.push_back(leaf_ptr);
     }
 }
 
@@ -446,7 +467,8 @@ do_insert_as(TrieState & state)
 {
     Node * node = as<Node>();
 
-    //cerr << "node = " << node << endl;
+    cerr << "do_insert_as: node = " << node << " depth = " << state.depth
+         << endl;
 
     int parent = state.nparents;
 
@@ -459,7 +481,7 @@ do_insert_as(TrieState & state)
         TriePtr child = TriePtr(node->dereference(found));
         state.matched(node->width());
         state.push_back(child);
-
+        
         TriePtr new_child = child.insert(state);
 
         //cerr << "new_child = " << new_child << " child = " << child << endl;
@@ -486,7 +508,7 @@ insert(TrieState & state)
 {
     if (is_leaf) return *this;
 
-    TRIE_SWITCH_ON_NODE(state.depth, return do_insert_as, (state));
+    TRIE_SWITCH_ON_TYPE(state.depth, return do_insert_as, (state));
 }
 
 uint64_t &
