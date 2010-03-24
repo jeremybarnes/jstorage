@@ -31,6 +31,7 @@ using namespace std;
 struct TrieNode;
 struct TrieLeaf;
 struct TrieState;
+struct TriePtr;
 
 /** Base class for an allocator.  */
 struct TrieAllocator {
@@ -81,6 +82,28 @@ struct TrieAllocatorAdaptor : public TrieAllocator {
     Allocator allocator;
 };
 
+// Operations structure to do with the leaves.  Allows the client to control
+// how the data is stored in the leaves.
+
+struct TrieLeafOps {
+    virtual ~TrieLeafOps() {}
+
+    // Create a new leaf branch that will contain the rest of the key
+    // from here.
+    virtual TriePtr new_branch(TrieState & state) = 0;
+
+    // Free the given branch
+    virtual void free(TriePtr ptr, TrieAllocator & allocator) = 0;
+
+    // How many leaves are in this leaf branch?
+    virtual uint64_t size(TriePtr ptr)  = 0;
+
+    // Insert the new leaf into the given branch
+    virtual TriePtr insert(TriePtr ptr, TrieState & state) = 0;
+
+    // How much memory does this leaf use?
+    virtual size_t memusage(TriePtr ptr) const = 0;
+};
 
 struct TriePtr {
 
@@ -88,28 +111,6 @@ struct TriePtr {
         : bits(0)
     {
     }
-
-#if 0
-    template<typename T>
-    TriePtr(T * val)
-        : is_leaf(0), type(0), ptr((uint64_t)val)
-    {
-        //cerr << "TriePtr initialized to " << *this << " from "
-        //     << val << endl;
-    }
-
-    template<typename T>
-    TriePtr & operator = (T * val)
-    {
-        type = 0;
-        ptr = (uint64_t)val;
-
-        //cerr << "TriePtr initialized to " << *this << " from "
-        //     << val << endl;
-
-        return *this;
-    }
-#endif
 
     union {
         struct {
@@ -132,16 +133,13 @@ struct TriePtr {
     // reallocated.
     TriePtr insert(TrieState & state);
 
-    // Get the leaf for a leaf node
-    uint64_t & leaf(TrieState & state) const;
-
     // How big is the tree?
-    size_t size(int depth) const;
+    size_t size(TrieLeafOps & ops) const;
 
     // Free everything associated with it
-    void free(TrieAllocator & allocator, int depth);
+    void free(TrieAllocator & allocator, TrieLeafOps & ops);
 
-    size_t memusage(int depth) const;
+    size_t memusage(TrieLeafOps & ops) const;
 
 
     //private:
@@ -196,7 +194,7 @@ struct TriePtr {
 
     template<typename Node>
     size_t
-    do_size_as(int depth) const;
+    do_size_as() const;
 
     std::string print() const
     {
@@ -211,8 +209,10 @@ std::ostream & operator << (std::ostream & stream, const TriePtr & p)
 
 struct TrieState {
     template<typename Alloc>
-    TrieState(const char * key, TriePtr root, Alloc & allocator)
+    TrieState(const char * key, TriePtr root,
+              TrieLeafOps & ops, Alloc & allocator)
         : key(key), depth(0), nparents(1),
+          leaf_ops(leaf_ops),
           allocator(*reinterpret_cast<TrieAllocator *>(alloc_space))
     {
         BOOST_STATIC_ASSERT(sizeof(TrieAllocatorAdaptor<Alloc>) <= 256);
@@ -260,6 +260,8 @@ struct TrieState {
             stream << "    " << i << ": " << parents[i] << endl;
         }
     }
+
+    TrieLeafOps & leaf_ops;
 
     // Space for the allocator to be constructed
     char alloc_space[256];
@@ -327,47 +329,29 @@ struct DenseTrieBase {
 
 struct DenseTrieNode : public DenseTrieBase<TriePtr> {
 
-    void free_children(TrieAllocator & allocator, int depth)
+    void free_children(TrieAllocator & allocator, TrieLeafOps & ops)
     {
         for (unsigned i = 0;  i < 256;  ++i)
-            children[i].free(allocator, depth + 1);
+            children[i].free(allocator, ops);
     }
 
-    size_t memusage(int depth) const
+    size_t memusage(TrieLeafOps & ops) const
     {
         size_t result = sizeof(*this);
         for (unsigned i = 0;  i < 256;  ++i)
-            result += children[i].memusage(depth + 1);
+            result += children[i].memusage(ops);
         return result;
     }
 
-    size_t size(int depth)
+    size_t size(TrieLeafOps & ops) const
     {
         size_t result = 0;
         for (unsigned i = 0;  i < 256;  ++i)
             if (presence[i])
-                result += children[i].size(depth + 1);
+                result += children[i].size(ops);
         return result;
     }
 
-};
-
-struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
-
-    void free_children(TrieAllocator & allocator, int depth)
-    {
-    }
-
-    size_t memusage(int depth)
-    {
-        size_t result = sizeof(*this);
-        return result;
-    }
-
-    size_t size(int depth)
-    {
-        return presence.count();
-    }
 };
 
 
@@ -375,35 +359,21 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 /* TRIEPTR                                                                   */
 /*****************************************************************************/
 
-#define TRIE_SWITCH_ON_NODE(depth, action, args)                        \
-    do {                                                                \
-        if (depth > 7)                                                  \
-            throw Exception("create: invalid depth");                   \
-        action<DenseTrieNode> args;                                     \
-    } while (0)
-
-#define TRIE_SWITCH_ON_LEAF(depth, action, args)                        \
-    do {                                                                \
-        if (depth > 7)                                                  \
-            throw Exception("create: invalid depth");                   \
-        action<DenseTrieLeaf> args;                                     \
-    } while (0)
-
 // Macro that will figure out what the type of the node is and coerce it into
 // the correct type before calling the given method on it
-#define TRIE_SWITCH_ON_TYPE(depth, action, args)                        \
+
+#define TRIE_SWITCH_ON_NODE(action, args)                               \
     do {                                                                \
-        if (is_leaf) TRIE_SWITCH_ON_LEAF(depth, action, args);          \
-        else         TRIE_SWITCH_ON_NODE(depth, action, args);          \
+        action<DenseTrieNode> args;                                     \
     } while (0)
 
 size_t
 TriePtr::
-memusage(int depth) const
+memusage(TrieLeafOps & ops) const
 {
     if (ptr == 0) return 0;
 
-    TRIE_SWITCH_ON_TYPE(depth, return as, ()->memusage(depth));
+    TRIE_SWITCH_ON_NODE(return as, ()->memusage(ops));
 }
 
 template<typename Node>
@@ -453,11 +423,13 @@ void
 TriePtr::
 match(TrieState & state) const
 {
+#if 0
     if (!ptr || state.depth == 8) return;
 
     if (is_leaf)
         TRIE_SWITCH_ON_LEAF(state.depth, match_leaf_as, (state));
     else TRIE_SWITCH_ON_NODE(state.depth, match_node_as, (state));
+#endif
 }
 
 template<typename Node>
@@ -496,7 +468,8 @@ do_insert_as(TrieState & state)
         //cerr << "finished parent " << parent << " node = " << node
         //     << " this = " << *this << endl;
 
-        return TriePtr(node);
+        TriePtr result;
+        result.set_node(node);
     }
     
     throw Exception("node insert failed; need to change to new kind of node");
@@ -506,35 +479,26 @@ TriePtr
 TriePtr::
 insert(TrieState & state)
 {
-    if (is_leaf) return *this;
+    if (is_leaf) return state.leaf_ops.insert(*this, state);
 
-    TRIE_SWITCH_ON_TYPE(state.depth, return do_insert_as, (state));
-}
-
-uint64_t &
-TriePtr::
-leaf(TrieState & state) const
-{
-    if (state.depth != 8)
-        throw Exception("state depth wrong");
-    uint64_t * p = as<uint64_t>();
-    return *p;
+    TRIE_SWITCH_ON_NODE(return do_insert_as, (state));
 }
 
 size_t
 TriePtr::
-size(int depth) const
+size(TrieLeafOps & ops) const
 {
     if (!ptr) return 0;
-    
-    TRIE_SWITCH_ON_TYPE(depth, return as, ()->size(depth));
+    if (is_leaf) return ops.size(*this);
+
+    TRIE_SWITCH_ON_NODE(return as, ()->size(ops));
 }
 
 template<typename T>
-void destroy_as(TriePtr & obj, TrieAllocator & allocator, int depth)
+void destroy_as(TriePtr & obj, TrieAllocator & allocator, TrieLeafOps & ops)
 {
     T * o = obj.as<T>();
-    o->free_children(allocator, depth);
+    o->free_children(allocator, ops);
     o->~T();
     allocator.deallocate(o, sizeof(T));
     obj = TriePtr();
@@ -542,10 +506,11 @@ void destroy_as(TriePtr & obj, TrieAllocator & allocator, int depth)
 
 void
 TriePtr::
-free(TrieAllocator & allocator, int depth)
+free(TrieAllocator & allocator, TrieLeafOps & ops)
 {
     if (!ptr) return;
-    TRIE_SWITCH_ON_TYPE(depth, destroy_as, (*this, allocator, depth));
+    if (is_leaf) ops.free(*this, allocator);
+    else TRIE_SWITCH_ON_NODE(destroy_as, (*this, allocator, ops));
 }
 
 
@@ -553,12 +518,99 @@ free(TrieAllocator & allocator, int depth)
 /* TRIE                                                                      */
 /*****************************************************************************/
 
+struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
+
+    void free_children(TrieAllocator & allocator, int depth)
+    {
+    }
+
+    size_t memusage(int depth)
+    {
+        size_t result = sizeof(*this);
+        return result;
+    }
+
+    size_t size(int depth)
+    {
+        return presence.count();
+    }
+};
+
 template<typename Alloc = std::allocator<char> >
 struct Trie {
     Trie(const Alloc & alloc = Alloc())
         : itl(alloc)
     {
     }
+
+    struct LeafOps : public TrieLeafOps {
+        virtual ~LeafOps() {}
+        
+        virtual TriePtr new_branch(TrieState & state)
+        {
+            throw Exception("new_branch not done yet");
+            return TriePtr();
+        }
+        
+        virtual void free(TriePtr ptr, TrieAllocator & allocator)
+        {
+            if (!ptr)
+                throw Exception("insert(): null pointer");
+            if (!ptr.is_leaf)
+                throw Exception("insert(): not leaf");
+
+            DenseTrieLeaf * l = ptr.as<DenseTrieLeaf>();
+            if (!l) return;
+            l->~DenseTrieLeaf();
+            allocator.deallocate((char *)l, sizeof(DenseTrieLeaf));
+        }
+        
+        virtual uint64_t size(TriePtr ptr)
+        {
+            if (!ptr)
+                throw Exception("insert(): null pointer");
+            if (!ptr.is_leaf)
+                throw Exception("insert(): not leaf");
+
+            DenseTrieLeaf * l = ptr.as<DenseTrieLeaf>();
+            if (!l) return 0;
+            return l->presence.count();
+        }
+        
+        virtual TriePtr insert(TriePtr ptr, TrieState & state)
+        {
+            if (!ptr)
+                throw Exception("insert(): null pointer");
+            if (!ptr.is_leaf)
+                throw Exception("insert(): not leaf");
+            if (state.depth != 7)
+                throw Exception("leaf insert with wrong depth");
+
+            DenseTrieLeaf * l = ptr.as<DenseTrieLeaf>();
+            if (!l) {
+                void * mem = state.allocator.allocate(sizeof(DenseTrieLeaf));
+                try {
+                    l = new (mem) DenseTrieLeaf();
+                } catch (...) {
+                    state.allocator.deallocate(mem, sizeof(DenseTrieLeaf));
+                }
+            }
+
+            l->insert(state.key);
+            state.matched(l->width());
+
+            TriePtr result;
+            result.set_leaf(l);
+            return result;
+        }
+        
+        virtual size_t memusage(TriePtr ptr) const
+        {
+            DenseTrieLeaf * l = ptr.as<DenseTrieLeaf>();
+            if (!l) return 0;
+            return sizeof(DenseTrieLeaf);
+        }
+    };
 
     // Use the empty base class trick to avoid memory allocation if
     // sizeof(Alloc) == 0
@@ -576,29 +628,34 @@ struct Trie {
     ~Trie()
     {
         TrieAllocatorAdaptor<Alloc> allocator(itl.allocator());
-        itl.root.free(allocator, 0);
+        LeafOps ops;
+        itl.root.free(allocator, ops);
     }
 
     uint64_t & operator [] (uint64_t key_)
     {
         const char * key = (const char *)&key_;
-        
-        TrieState state(key, itl.root, itl.allocator());
+
+        LeafOps ops;
+
+        TrieState state(key, itl.root, ops, itl.allocator());
         TriePtr val = itl.root.insert(state);
         if (itl.root != val)
             itl.root = val;
 
-        return state.back().leaf(state);
+        return *state.back().as<uint64_t>();
     }
 
     size_t size() const
     {
-        return itl.root.size(0);
+        LeafOps ops;
+        return itl.root.size(ops);
     }
     
     size_t memusage() const
     {
-        return itl.root.memusage(0);
+        LeafOps ops;
+        return itl.root.memusage(ops);
     }
 };
 
