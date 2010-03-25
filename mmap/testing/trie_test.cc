@@ -51,6 +51,14 @@ struct TrieAllocator {
             throw;
         }
     }
+
+    template<typename T>
+    void destroy(T * value)
+    {
+        value->~T();
+        size_t bytes = sizeof(T);
+        deallocate((char *)value, bytes);
+    }
 };
 
 /** Template to wrap an STL-like allocator into a standard allocator.  These
@@ -198,7 +206,7 @@ struct TriePtr {
 
     std::string print() const
     {
-        return format("%012x", ptr);
+        return format("%012x %c %d", ptr, (is_leaf ? 'l' : 'n'), type);
     }
 };
 
@@ -210,7 +218,7 @@ std::ostream & operator << (std::ostream & stream, const TriePtr & p)
 struct TrieState {
     template<typename Alloc>
     TrieState(const char * key, TriePtr root,
-              TrieLeafOps & ops, Alloc & allocator)
+              TrieLeafOps & leaf_ops, Alloc & allocator)
         : key(key), depth(0), nparents(1),
           leaf_ops(leaf_ops),
           allocator(*reinterpret_cast<TrieAllocator *>(alloc_space))
@@ -372,8 +380,8 @@ TriePtr::
 memusage(TrieLeafOps & ops) const
 {
     if (ptr == 0) return 0;
-
-    TRIE_SWITCH_ON_NODE(return as, ()->memusage(ops));
+    else if (is_leaf) return ops.memusage(*this);
+    else TRIE_SWITCH_ON_NODE(return as, ()->memusage(ops));
 }
 
 template<typename Node>
@@ -439,8 +447,8 @@ do_insert_as(TrieState & state)
 {
     Node * node = as<Node>();
 
-    cerr << "do_insert_as: node = " << node << " depth = " << state.depth
-         << endl;
+    //cerr << "do_insert_as: node = " << node << " depth = " << state.depth
+    //     << endl;
 
     int parent = state.nparents;
 
@@ -470,6 +478,7 @@ do_insert_as(TrieState & state)
 
         TriePtr result;
         result.set_node(node);
+        return result;
     }
     
     throw Exception("node insert failed; need to change to new kind of node");
@@ -479,9 +488,17 @@ TriePtr
 TriePtr::
 insert(TrieState & state)
 {
-    if (is_leaf) return state.leaf_ops.insert(*this, state);
+    // If there's nothing there then we ask for a new branch.  If there's a
+    // node there then we ask for it to be inserted, otherwise we ask for
+    // a new leaf to be inserted.
 
-    TRIE_SWITCH_ON_NODE(return do_insert_as, (state));
+    //cerr << "insert: this = " << this << " is_leaf = " << is_leaf
+    //     << " type = " << type << " ptr = " << ptr << endl;
+    //cerr << "state = " << state << endl;
+
+    if (!*this) return state.leaf_ops.new_branch(state);
+    else if (is_leaf) return state.leaf_ops.insert(*this, state);
+    else TRIE_SWITCH_ON_NODE(return do_insert_as, (state));
 }
 
 size_t
@@ -499,8 +516,7 @@ void destroy_as(TriePtr & obj, TrieAllocator & allocator, TrieLeafOps & ops)
 {
     T * o = obj.as<T>();
     o->free_children(allocator, ops);
-    o->~T();
-    allocator.deallocate(o, sizeof(T));
+    allocator.destroy(o);
     obj = TriePtr();
 }
 
@@ -548,8 +564,18 @@ struct Trie {
         
         virtual TriePtr new_branch(TrieState & state)
         {
-            throw Exception("new_branch not done yet");
-            return TriePtr();
+            // To create a new branch, we create nodes all the way up to a leaf,
+            // and finish it off with the leaf.
+
+            if (state.depth == 7) {
+                // We need a leaf
+                TriePtr result;  // null to make sure it's created
+                return insert(result, state);
+            }
+            
+            TriePtr result;
+            result = result.do_insert_as<DenseTrieNode>(state);
+            return result;
         }
         
         virtual void free(TriePtr ptr, TrieAllocator & allocator)
@@ -561,8 +587,7 @@ struct Trie {
 
             DenseTrieLeaf * l = ptr.as<DenseTrieLeaf>();
             if (!l) return;
-            l->~DenseTrieLeaf();
-            allocator.deallocate((char *)l, sizeof(DenseTrieLeaf));
+            allocator.destroy(l);
         }
         
         virtual uint64_t size(TriePtr ptr)
@@ -579,25 +604,15 @@ struct Trie {
         
         virtual TriePtr insert(TriePtr ptr, TrieState & state)
         {
-            if (!ptr)
-                throw Exception("insert(): null pointer");
-            if (!ptr.is_leaf)
+            if (ptr && !ptr.is_leaf)
                 throw Exception("insert(): not leaf");
             if (state.depth != 7)
                 throw Exception("leaf insert with wrong depth");
 
             DenseTrieLeaf * l = ptr.as<DenseTrieLeaf>();
-            if (!l) {
-                void * mem = state.allocator.allocate(sizeof(DenseTrieLeaf));
-                try {
-                    l = new (mem) DenseTrieLeaf();
-                } catch (...) {
-                    state.allocator.deallocate(mem, sizeof(DenseTrieLeaf));
-                }
-            }
-
+            if (!l) l = state.allocator.create<DenseTrieLeaf>();
+            
             l->insert(state.key);
-            state.matched(l->width());
 
             TriePtr result;
             result.set_leaf(l);
@@ -643,7 +658,9 @@ struct Trie {
         if (itl.root != val)
             itl.root = val;
 
-        return *state.back().as<uint64_t>();
+        //cerr << "final state: " << state << endl;
+
+        return *state.back().as<DenseTrieLeaf>()->insert(state.key);
     }
 
     size_t size() const
