@@ -155,6 +155,7 @@ struct TriePtr {
     void set_node(T * node)
     {
         is_leaf = 0;
+        this->type = T::node_type;
         ptr = (uint64_t)node;
     }
 
@@ -162,6 +163,7 @@ struct TriePtr {
     void set_leaf(T * node)
     {
         is_leaf = 1;
+        this->type = T::node_type;
         ptr = (uint64_t)node;
     }
 
@@ -169,6 +171,7 @@ struct TriePtr {
     void set_payload(T * node)
     {
         is_leaf = 1;
+        type = 0;
         ptr = (uint64_t)node;
     }
 
@@ -285,6 +288,8 @@ std::ostream & operator << (std::ostream & stream, const TrieState & state)
 template<typename Payload>
 struct DenseTrieBase {
 
+    enum { node_type = 1 };
+
     static int width()
     {
         return 1;
@@ -362,6 +367,141 @@ struct DenseTrieNode : public DenseTrieBase<TriePtr> {
 
 };
 
+template<typename Payload>
+struct SingleTrieBase {
+
+    typedef Payload value_type;
+    typedef bool iterator;
+    typedef bool const_iterator;
+
+    enum { node_type = 2 };
+
+    int width()
+    {
+        return width_;
+    }
+
+    // Attempt to match width() characters from the key.  If it matches, then
+    // return a pointer to the next node.  If there was no match, return a
+    // null pointer.
+    const_iterator match(const char * key) const
+    {
+        for (unsigned i = 0;  i < width_;  ++i)
+            if (key[i] != key_[i]) return false;
+        return true;
+    }
+
+    // Insert width() characters from the key into the map.  Returns the
+    // iterator to access the next level.  Note that the iterator may be
+    // null; in this case the node was full and will need to be expanded.
+    const_iterator insert(const char * key)
+    {
+        if (match(key)) return true;
+        return false;
+    }
+
+    void set_ptr(iterator it, Payload new_ptr)
+    {
+        if (!it)
+            throw Exception("set_ptr but pointer doesn't exist");
+        payload_ = new_ptr;
+    }
+
+    bool not_null(const_iterator it) const
+    {
+        return it;
+    }
+    
+    value_type dereference(const_iterator it) const
+    {
+        if (!it)
+            throw Exception("dereferenced null ptr");
+        return payload_;
+    }
+
+    uint8_t width_;
+    char key_[8];
+    Payload payload_;
+};
+
+struct SingleTrieNode : public SingleTrieBase<TriePtr> {
+
+    void free_children(TrieAllocator & allocator, TrieLeafOps & ops)
+    {
+        payload_.free(allocator, ops);
+    }
+
+    size_t memusage(TrieLeafOps & ops) const
+    {
+        return sizeof(*this) + payload_.memusage(ops);
+    }
+
+    size_t size(TrieLeafOps & ops) const
+    {
+        return payload_.size(ops);
+    }
+};
+
+#if 0
+template<typename Payload>
+struct SparseTrieBase {
+
+    static int width()
+    {
+        return width;
+    }
+
+    uint8_t capacity;
+    uint8_t size;
+    uint8_t width;
+
+
+    typedef Payload value_type;
+    typedef value_type * iterator;
+    typedef const value_type * const_iterator;
+
+    // Attempt to match width() characters from the key.  If it matches, then
+    // return a pointer to the next node.  If there was no match, return a
+    // null pointer.
+    const_iterator match(const char * key) const
+    {
+        int index = *key;
+        if (index < 0) index += 256;
+        if (!presence[index]) return 0;
+        return &children[index];
+    }
+
+    // Insert width() characters from the key into the map.  Returns the
+    // iterator to access the next level.  Note that the iterator may be
+    // null; in this case the node was full and will need to be expanded.
+    iterator insert(const char * key)
+    {
+        int index = *key;
+        if (index < 0) index += 256;
+        if (!presence[index]) presence.set(index);
+        return &children[index];
+    }
+
+    void set_ptr(iterator it, Payload new_ptr)
+    {
+        *it = new_ptr;
+    }
+
+    bool not_null(const_iterator it) const
+    {
+        return it;
+    }
+    
+    value_type dereference(const_iterator it) const
+    {
+        return *it;
+    }
+
+    std::bitset<256> presence;  // one bit per leaf; says if it's there or not
+    Payload children[256];
+};
+#endif
+
 
 /*****************************************************************************/
 /* TRIEPTR                                                                   */
@@ -372,7 +512,11 @@ struct DenseTrieNode : public DenseTrieBase<TriePtr> {
 
 #define TRIE_SWITCH_ON_NODE(action, args)                               \
     do {                                                                \
-        action<DenseTrieNode> args;                                     \
+    switch (type) {                                                     \
+    case DenseTrieNode::node_type: action<DenseTrieNode> args;  break;  \
+    case SingleTrieNode::node_type: action<SingleTrieNode> args;  break; \
+    default: throw Exception("unknown node type");                      \
+    }                                                                   \
     } while (0)
 
 size_t
