@@ -63,6 +63,11 @@ struct TrieAllocator {
     }
 };
 
+struct TrieKey {
+    char key_[8];
+    int len_;
+};
+
 // Operations structure to do with the leaves.  Allows the client to control
 // how the data is stored in the leaves.
 
