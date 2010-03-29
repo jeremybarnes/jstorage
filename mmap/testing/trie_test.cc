@@ -1064,12 +1064,9 @@ struct Trie {
         itl.root.free(ops);
     }
 
-    uint64_t & operator [] (uint64_t key_)
+    uint64_t & operator [] (uint64_t key)
     {
-        const char * key = (const char *)&key_;
-
         LeafOps ops(this);
-
         TrieState state(key, itl.root, ops);
 
         cerr << "state init" << endl;
