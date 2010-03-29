@@ -37,6 +37,7 @@ struct TriePtr;
 /** Base class for an allocator.  */
 struct TrieAllocator {
     virtual ~TrieAllocator() {}
+
     virtual void * allocate(size_t bytes) = 0;
     virtual void deallocate(void * mem, size_t bytes) = 0;
 
@@ -62,39 +63,10 @@ struct TrieAllocator {
     }
 };
 
-/** Template to wrap an STL-like allocator into a standard allocator.  These
-    objects will be created on-the-fly, so it is important that they be
-    lightweight.
-*/
-template<class Allocator>
-struct TrieAllocatorAdaptor : public TrieAllocator {
-
-    TrieAllocatorAdaptor(const Allocator & allocator = Allocator())
-        : allocator(allocator)
-    {
-    }
-
-    virtual ~TrieAllocatorAdaptor()
-    {
-    }
-
-    virtual void * allocate(size_t bytes)
-    {
-        return allocator.allocate(bytes);
-    }
-
-    virtual void deallocate(void * mem, size_t bytes)
-    {
-        allocator.deallocate((char *)mem, bytes);
-    }
-
-    Allocator allocator;
-};
-
 // Operations structure to do with the leaves.  Allows the client to control
 // how the data is stored in the leaves.
 
-struct TrieLeafOps {
+struct TrieLeafOps : public TrieAllocator {
     virtual ~TrieLeafOps() {}
 
     // Create a new leaf branch that will contain the rest of the key
@@ -102,7 +74,7 @@ struct TrieLeafOps {
     virtual TriePtr new_branch(TrieState & state) = 0;
 
     // Free the given branch
-    virtual void free(TriePtr ptr, TrieAllocator & allocator) = 0;
+    virtual void free(TriePtr ptr, TrieLeafOps & ops) = 0;
 
     // How many leaves are in this leaf branch?
     virtual uint64_t size(TriePtr ptr) const = 0;
@@ -155,7 +127,7 @@ struct TriePtr {
     size_t size(TrieLeafOps & ops) const;
 
     // Free everything associated with it
-    void free(TrieAllocator & allocator, TrieLeafOps & ops);
+    void free(TrieLeafOps & ops);
 
     // How much memory does it take up?
     size_t memusage(TrieLeafOps & ops) const;
@@ -334,20 +306,16 @@ private:
 };
 
 struct TrieState : public TriePath {
-    template<typename Alloc>
+
     TrieState(const char * key, TriePtr root,
-              TrieLeafOps & leaf_ops, Alloc & allocator)
+              TrieLeafOps & leaf_ops)
         : TriePath(root, root.width(leaf_ops)),
-          key(key), leaf_ops(leaf_ops),
-          allocator(*reinterpret_cast<TrieAllocator *>(alloc_space))
+          key(key), leaf_ops(leaf_ops)
     {
-        BOOST_STATIC_ASSERT(sizeof(TrieAllocatorAdaptor<Alloc>) <= 256);
-        new (alloc_space) TrieAllocatorAdaptor<Alloc>(allocator);
     }
     
     ~TrieState()
     {
-        allocator.~TrieAllocator();
     }
 
     const char * key;
@@ -394,10 +362,6 @@ struct TrieState : public TriePath {
     }
 
     TrieLeafOps & leaf_ops;
-
-    // Space for the allocator to be constructed
-    char alloc_space[256];
-    TrieAllocator & allocator;
 };
 
 std::ostream & operator << (std::ostream & stream, const TrieState & state)
@@ -493,10 +457,10 @@ struct DenseTrieBase {
 
 struct DenseTrieNode : public DenseTrieBase<TriePtr> {
 
-    void free_children(TrieAllocator & allocator, TrieLeafOps & ops)
+    void free_children(TrieLeafOps & ops)
     {
         for (unsigned i = 0;  i < 256;  ++i)
-            children[i].free(allocator, ops);
+            children[i].free(ops);
     }
 
     size_t memusage(TrieLeafOps & ops) const
@@ -607,9 +571,9 @@ struct SingleTrieBase {
 
 struct SingleTrieNode : public SingleTrieBase<TriePtr> {
 
-    void free_children(TrieAllocator & allocator, TrieLeafOps & ops)
+    void free_children(TrieLeafOps & ops)
     {
-        payload_.free(allocator, ops);
+        payload_.free(ops);
     }
 
     size_t memusage(TrieLeafOps & ops) const
@@ -717,7 +681,7 @@ do_insert_as(TrieState & state)
 
     int depth = state.depth();
 
-    if (!ptr) node = state.allocator.create<Node>();
+    if (!ptr) node = state.leaf_ops.create<Node>();
 
     int16_t found = node->insert(state.key);
 
@@ -775,21 +739,21 @@ size(TrieLeafOps & ops) const
 }
 
 template<typename T>
-void destroy_as(TriePtr & obj, TrieAllocator & allocator, TrieLeafOps & ops)
+void destroy_as(TriePtr & obj, TrieLeafOps & ops)
 {
     T * o = obj.as<T>();
-    o->free_children(allocator, ops);
-    allocator.destroy(o);
+    o->free_children(ops);
+    ops.destroy(o);
     obj = TriePtr();
 }
 
 void
 TriePtr::
-free(TrieAllocator & allocator, TrieLeafOps & ops)
+free(TrieLeafOps & ops)
 {
     if (!ptr) return;
-    if (is_leaf) ops.free(*this, allocator);
-    else TRIE_SWITCH_ON_NODE(destroy_as, (*this, allocator, ops));
+    if (is_leaf) ops.free(*this, ops);
+    else TRIE_SWITCH_ON_NODE(destroy_as, (*this, ops));
 }
 
 template<typename T>
@@ -838,10 +802,6 @@ print(TrieLeafOps & ops) const
 
 struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 
-    void free_children(TrieAllocator & allocator, int depth)
-    {
-    }
-
     size_t memusage()
     {
         size_t result = sizeof(*this);
@@ -855,10 +815,6 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 };
 
 struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
-
-    void free_children(TrieAllocator & allocator, int depth)
-    {
-    }
 
     size_t memusage()
     {
@@ -884,15 +840,49 @@ struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
     }                                                                   \
     } while (0)
 
+/*****************************************************************************/
+/* TRIE                                                                      */
+/*****************************************************************************/
+
 template<typename Alloc = std::allocator<char> >
 struct Trie {
+    // Use the empty base class trick to avoid memory allocation if
+    // sizeof(Alloc) == 0
+    struct Itl : public Alloc {
+        Itl(const Alloc & alloc)
+            : Alloc(alloc)
+        {
+        }
+
+        TriePtr root;
+        
+        Alloc & allocator() { return *this; }
+    } itl;
+
     Trie(const Alloc & alloc = Alloc())
         : itl(alloc)
     {
     }
 
     struct LeafOps : public TrieLeafOps {
+        LeafOps(const Trie * trie)
+            : trie(const_cast<Trie *>(trie))
+        {
+        }
+
+        Trie * trie;
+
         virtual ~LeafOps() {}
+
+        virtual void * allocate(size_t bytes)
+        {
+            return trie->itl.allocator().allocate(bytes);
+        }
+        
+        virtual void deallocate(void * mem, size_t bytes)
+        {
+            trie->itl.allocator().deallocate((char *)mem, bytes);
+        }
         
         virtual TriePtr new_branch(TrieState & state)
         {
@@ -901,7 +891,7 @@ struct Trie {
 
             // A single thing to insert, so we do a single leaf
             SingleTrieLeaf * new_leaf
-                = state.allocator.create<SingleTrieLeaf>();
+                = state.leaf_ops.create<SingleTrieLeaf>();
             
             new_leaf->width_ = 9 - state.depth();
             for (unsigned i = 0;  i < new_leaf->width_;  ++i)
@@ -929,16 +919,16 @@ struct Trie {
         }
 
         template<typename Leaf>
-        void free_as(TriePtr ptr, TrieAllocator & allocator)
+        void free_as(TriePtr ptr, TrieLeafOps & ops)
         {
             Leaf * l = ptr.as<Leaf>();
             if (!l) return;
-            allocator.destroy(l);
+            ops.destroy(l);
         }
 
-        virtual void free(TriePtr ptr, TrieAllocator & allocator)
+        virtual void free(TriePtr ptr, TrieLeafOps & ops)
         {
-            TRIE_SWITCH_ON_LEAF(free_as, ptr.type, (ptr, allocator));
+            TRIE_SWITCH_ON_LEAF(free_as, ptr.type, (ptr, ops));
         }
 
         template<typename Leaf>
@@ -959,7 +949,7 @@ struct Trie {
         TriePtr insert_as(TriePtr ptr, TrieState & state)
         {
             Leaf * l = ptr.as<Leaf>();
-            if (!l) l = state.allocator.create<Leaf>();
+            if (!l) l = state.leaf_ops.create<Leaf>();
             
             l->insert(state.key);
             
@@ -1027,9 +1017,11 @@ struct Trie {
                                         uint64_t,
                                         boost::bidirectional_traversal_tag> {
         
+        Trie * trie;
+
         uint64_t key() const
         {
-            LeafOps ops;
+            LeafOps ops(trie);
 
             if (path_.width() != 8)
                 throw Exception("key() on not fully inserted path");
@@ -1051,7 +1043,7 @@ struct Trie {
             if (path_.width() != 8)
                 throw Exception("key() on not fully inserted path");
 
-            LeafOps ops;
+            LeafOps ops(trie);
             return ops.dereference(path_.back().ptr, path_.back().iterator);
         }
         
@@ -1081,33 +1073,19 @@ struct Trie {
         }
     };
 
-    // Use the empty base class trick to avoid memory allocation if
-    // sizeof(Alloc) == 0
-    struct Itl : public Alloc {
-        Itl(const Alloc & alloc)
-            : Alloc(alloc)
-        {
-        }
-
-        TriePtr root;
-        
-        Alloc & allocator() { return *this; }
-    } itl;
-
     ~Trie()
     {
-        TrieAllocatorAdaptor<Alloc> allocator(itl.allocator());
-        LeafOps ops;
-        itl.root.free(allocator, ops);
+        LeafOps ops(this);
+        itl.root.free(ops);
     }
 
     uint64_t & operator [] (uint64_t key_)
     {
         const char * key = (const char *)&key_;
 
-        LeafOps ops;
+        LeafOps ops(this);
 
-        TrieState state(key, itl.root, ops, itl.allocator());
+        TrieState state(key, itl.root, ops);
 
         cerr << "state init" << endl;
         state.dump(cerr, ops);
@@ -1128,13 +1106,13 @@ struct Trie {
 
     size_t size() const
     {
-        LeafOps ops;
+        LeafOps ops(this);
         return itl.root.size(ops);
     }
     
     size_t memusage() const
     {
-        LeafOps ops;
+        LeafOps ops(this);
         return itl.root.memusage(ops);
     }
 };
