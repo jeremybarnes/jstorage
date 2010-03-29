@@ -114,16 +114,19 @@ struct TrieOps : public TrieAllocator {
 
     // Create a new leaf branch that will contain the rest of the key
     // from here.
-    virtual TriePtr new_branch(TrieOps & ops, TrieState & state) = 0;
+    virtual TriePtr new_branch(TrieState & state) = 0;
 
     // Free the given branch
-    virtual void free(TriePtr ptr, TrieOps & ops) = 0;
+    virtual void free(TriePtr ptr) = 0;
 
     // How many leaves are in this leaf branch?
     virtual uint64_t size(TriePtr ptr) const = 0;
 
     // Insert the new leaf into the given branch
-    virtual TriePtr insert(TriePtr ptr, TrieOps & ops, TrieState & state) = 0;
+    virtual TriePtr insert(TriePtr ptr, TrieState & state) = 0;
+
+    // Expand the branch at ptr so that a new element can be inserted into it
+    virtual TriePtr expand(TriePtr ptr, TrieState & state) = 0;
 
     // How many characters does this match?
     virtual int width(TriePtr ptr) const = 0;
@@ -430,6 +433,13 @@ struct DenseTrieBase {
         return index;
     }
 
+    // Since we should always be able to insert into this one, it's an error
+    // if it doesn't work.
+    TriePtr expand(const TrieOps & ops, TrieState & state)
+    {
+        throw Exception("DenseTrieLeaf::expand(): should never be necessary");
+    }
+
     void set_ptr(int16_t it, Payload new_ptr)
     {
         if (it < 0 || it >= 256)
@@ -526,12 +536,16 @@ struct SingleTrieBase {
     int16_t match(const TrieKey & key, int done_width)
     {
         cerr << "match() for " << print() << endl;
-        cerr << "done_width " << done_width << " width_ = " << width_
+        cerr << "done_width " << done_width << " width_ = " << (int)width_
              << endl;
         cerr << "key = " << key.print(done_width) << endl;
 
-        for (unsigned i = 0;  i < width_;  ++i)
-            if (key[i + done_width] != key_[i]) return -1;
+        for (unsigned i = 0;  i < width_;  ++i) {
+            if (key[i + done_width] != key_[i]) {
+                cerr << "  DIDN'T MATCH ON " << i << endl;
+                return -1;
+            }
+        }
 
         cerr << "MATCHED" << endl;
 
@@ -582,15 +596,25 @@ struct SingleTrieBase {
 
     std::string print() const
     {
-        string result = format("Single node: width %d key ", width_);
-        for (unsigned i = 0;  i < width_;  ++i)
-            result += format("%02x ", (key_[i] < 0 ? key_[i] + 256 : key_[i]));
+        string result = format("Single node: width %d key ", width_)
+            + key_.print();
         //result += " payload " + ostream_format(payload_);
         return result;
     }
 
+    TriePtr expand(const TrieOps & ops, TrieState & state)
+    {
+        throw Exception("single node needs to expand");
+
+        // 1.  We create a common stem for whatever part is in common
+
+        // 2.  We create a node to split off
+
+        // 3.  We create two branches
+    }
+
     uint8_t width_;
-    char key_[8];
+    TrieKey key_;
     Payload payload_;
 };
 
@@ -727,8 +751,8 @@ insert(TrieOps & ops, TrieState & state)
     //     << " type = " << type << " ptr = " << ptr << endl;
     //cerr << "state = " << state << endl;
 
-    if (!*this) return ops.new_branch(ops, state);
-    else if (is_leaf) return ops.insert(*this, ops, state);
+    if (!*this) return ops.new_branch(state);
+    else if (is_leaf) return ops.insert(*this, state);
     else TRIE_SWITCH_ON_NODE(return do_insert_as, (ops, state));
 }
 
@@ -756,7 +780,7 @@ TriePtr::
 free(TrieOps & ops)
 {
     if (!ptr) return;
-    if (is_leaf) ops.free(*this, ops);
+    if (is_leaf) ops.free(*this);
     else TRIE_SWITCH_ON_NODE(destroy_as, (*this, ops));
 }
 
@@ -804,6 +828,19 @@ print(TrieOps & ops) const
 /* TRIE                                                                      */
 /*****************************************************************************/
 
+struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
+
+    size_t memusage()
+    {
+        return sizeof(*this);
+    }
+
+    size_t size()
+    {
+        return 1;
+    }
+};
+
 struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 
     size_t memusage()
@@ -815,19 +852,6 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
     size_t size()
     {
         return presence.count();
-    }
-};
-
-struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
-
-    size_t memusage()
-    {
-        return sizeof(*this);
-    }
-
-    size_t size()
-    {
-        return 1;
     }
 };
 
@@ -888,18 +912,18 @@ struct Trie {
             trie->itl.allocator().deallocate((char *)mem, bytes);
         }
         
-        virtual TriePtr new_branch(TrieOps & ops, TrieState & state)
+        virtual TriePtr new_branch(TrieState & state)
         {
             cerr << "new_branch: state " << endl;
             state.dump(cerr, *this);
 
             // A single thing to insert, so we do a single leaf
             SingleTrieLeaf * new_leaf
-                = ops.create<SingleTrieLeaf>();
+                = create<SingleTrieLeaf>();
             
             new_leaf->width_ = 8 - state.depth();
             for (unsigned i = 0;  i < new_leaf->width_;  ++i)
-                new_leaf->key_[i] = state.key[i];
+                new_leaf->key_.chars_[i] = state.key[i];
             new_leaf->payload_ = 0;
             
             TriePtr result;
@@ -907,31 +931,18 @@ struct Trie {
             state.push_back(result, new_leaf->width_);
             return result;
         }
-        
-        void nothing(TrieOps & ops, TrieState & state)
-        {
-            if (state.depth() == 7) {
-                // We need a leaf
-                TriePtr result;  // null to make sure it's created
-                return insert(result, state);
-            }
-
-            TriePtr result;
-            result = result.do_insert_as<DenseTrieNode>(ops, state);
-            return result;
-        }
 
         template<typename Leaf>
-        void free_as(TriePtr ptr, TrieOps & ops)
+        void free_as(TriePtr ptr)
         {
             Leaf * l = ptr.as<Leaf>();
             if (!l) return;
-            ops.destroy(l);
+            destroy(l);
         }
 
-        virtual void free(TriePtr ptr, TrieOps & ops)
+        virtual void free(TriePtr ptr)
         {
-            TRIE_SWITCH_ON_LEAF(free_as, ptr.type, (ptr, ops));
+            TRIE_SWITCH_ON_LEAF(free_as, ptr.type, (ptr));
         }
 
         template<typename Leaf>
@@ -949,23 +960,38 @@ struct Trie {
         }
         
         template<typename Leaf>
-        TriePtr insert_as(TriePtr ptr, TrieOps & ops, TrieState & state)
+        TriePtr insert_as(TriePtr ptr, TrieState & state)
         {
             Leaf * l = ptr.as<Leaf>();
-            if (!l) l = ops.create<Leaf>();
+            if (!l) l = create<Leaf>();
             
-            l->insert(state.key, state.width());
-            
-            TriePtr result;
-            result.set_leaf(l);
-            state.push_back(result, l->width());
+            int16_t iterator = l->insert(state.key, state.width());
+            if (l->not_null(iterator)) {
+                TriePtr result;
+                result.set_leaf(l);
+                state.push_back(result, l->width(), iterator);
+                return result;
+            }
 
-            return result;
+            // Insert failed; we need to expand the current node
+            return expand_as<Leaf>(ptr, state);
         }
         
-        virtual TriePtr insert(TriePtr ptr, TrieOps & ops, TrieState & state)
+        virtual TriePtr insert(TriePtr ptr, TrieState & state)
         {
-            TRIE_SWITCH_ON_LEAF(return insert_as, ptr.type, (ptr, ops, state));
+            TRIE_SWITCH_ON_LEAF(return insert_as, ptr.type, (ptr, state));
+        }
+
+        template<typename Leaf>
+        TriePtr expand_as(TriePtr ptr, TrieState & state)
+        {
+            Leaf * l = ptr.as<Leaf>();
+            return l->expand(*this, state);
+        }
+
+        virtual TriePtr expand(TriePtr ptr, TrieState & state)
+        {
+            TRIE_SWITCH_ON_LEAF(return expand_as, ptr.type, (ptr, state));
         }
         
         template<typename Leaf>
