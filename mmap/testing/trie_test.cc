@@ -17,6 +17,7 @@
 #include <boost/bind.hpp>
 #include <boost/utility/enable_if.hpp>
 #include <boost/type_traits/is_same.hpp>
+#include <boost/iterator/iterator_facade.hpp>
 #include <iostream>
 #include "jml/utils/guard.h"
 #include <boost/bind.hpp>
@@ -114,6 +115,9 @@ struct TrieLeafOps {
 
     // How much memory does this leaf use?
     virtual size_t memusage(TriePtr ptr) const = 0;
+
+    // Print a summary in a string
+    virtual std::string print(TriePtr ptr) const = 0;
 };
 
 struct TriePtr {
@@ -153,7 +157,11 @@ struct TriePtr {
     // Free everything associated with it
     void free(TrieAllocator & allocator, TrieLeafOps & ops);
 
+    // How much memory does it take up?
     size_t memusage(TrieLeafOps & ops) const;
+
+    // Extract the key to the given pointer
+    void key(TrieLeafOps & ops, uint16_t iterator, char * write_to) const;
 
     //private:
     template<typename T>
@@ -213,12 +221,11 @@ struct TriePtr {
     do_size_as() const;
 
     template<typename T>
-    int width_as(TriePtr ptr) const;
+    int width_as() const;
 
-    std::string print() const
-    {
-        return format("%012x %c %d", ptr, (is_leaf ? 'l' : 'n'), type);
-    }
+    std::string print() const;
+
+    std::string print(TrieLeafOps & ops) const;
 };
 
 std::ostream & operator << (std::ostream & stream, const TriePtr & p)
@@ -228,16 +235,16 @@ std::ostream & operator << (std::ostream & stream, const TriePtr & p)
 
 // A path through a trie.  Gives the basis for an iterator.
 struct TriePath {
-    TriePath(TriePtr root, int matched = -1)
+    TriePath(TriePtr root, int width)
         : width_(0), depth_(0)
     {
-        push_back(root, 0, matched);
+        push_back(root, width, 0);
     }
 
     struct Entry {
         TriePtr ptr;
-        uint8_t iterator;  // first element must be zero
-        uint8_t width;
+        int16_t iterator;  // first element must be zero
+        int16_t width;
     };
 
     Entry & back() { return entries_[depth_ - 1]; }
@@ -249,9 +256,9 @@ struct TriePath {
     // nmatched: ptr.width()
     void push_back(TriePtr ptr, int width, int iterator = 0)
     {
-        if (depth_ >= 8)
+        if (depth_ > 8)
             throw Exception("too deep");
-        if (width + width_ >= 8)
+        if (width + width_ > 8)
             throw Exception("too wide");
         width_ += width;
 
@@ -264,14 +271,32 @@ struct TriePath {
 
     void replace_at_depth(int depth, TriePtr ptr, int width, int iterator = 0)
     {
+        cerr << "replace_at_depth: depth = " << depth << " ptr = " << ptr
+             << " width = " << width << " iterator = " << iterator
+             << endl;
+        cerr << "entries[depth].ptr = " << entries_[depth].ptr << endl;
+        cerr << "entries[depth].width = " << (int)entries_[depth].width << endl;
+        cerr << "entries[depth].iterator = " << (int)entries_[depth].iterator
+             << endl;
+
         if (depth < 0 || depth >= depth_)
             throw Exception("replace_at_depth: invalid depth");
-        if (entries_[depth].width != width)
+        if (depth != depth_ - 1 && entries_[depth].width != width)
             throw Exception("replace_at_depth(): width doesn't match");
         
+        width_ -= entries_[depth].width;
+        width_ += width;
+
         entries_[depth].ptr = ptr;
         entries_[depth].width = width;
         entries_[depth].iterator = iterator;
+    }
+
+    const Entry & at_depth(int depth) const
+    {
+        if (depth < 0 || depth >= depth_)
+            throw Exception("at_depth(): invalid depth");
+        return entries_[depth];
     }
 
     void dump(std::ostream & stream, int indent = 0) const
@@ -282,9 +307,23 @@ struct TriePath {
         stream << s << "  parents (" << depth_ << "): " << endl;
         for (unsigned i = 0;  i < depth_;  ++i) {
             stream << s << "    " << i << ": "
-                   << entries_[i].width << " "
-                   << entries_[i].iterator
+                   << "w" << (int)entries_[i].width << " "
+                   << "it" << (int)entries_[i].iterator << " "
                    << entries_[i].ptr << endl;
+        }
+    }
+
+    void dump(std::ostream & stream, TrieLeafOps & ops, int indent = 0) const
+    {
+        string s(indent, ' ');
+        stream << s << "path: " << endl;
+        stream << s << "  width: " << width_ << endl;
+        stream << s << "  parents (" << depth_ << "): " << endl;
+        for (unsigned i = 0;  i < depth_;  ++i) {
+            stream << s << "    " << i << ": "
+                   << "w" << (int)entries_[i].width << " "
+                   << "it" << (int)entries_[i].iterator << " "
+                   << entries_[i].ptr.print(ops) << endl;
         }
     }
 
@@ -298,7 +337,7 @@ struct TrieState : public TriePath {
     template<typename Alloc>
     TrieState(const char * key, TriePtr root,
               TrieLeafOps & leaf_ops, Alloc & allocator)
-        : TriePath(root),
+        : TriePath(root, root.width(leaf_ops)),
           key(key), leaf_ops(leaf_ops),
           allocator(*reinterpret_cast<TrieAllocator *>(alloc_space))
     {
@@ -313,30 +352,45 @@ struct TrieState : public TriePath {
 
     const char * key;
 
-#if 0
-    void matched(int nchars)
+    void push_back(TriePtr ptr, int width, int iterator = 0)
     {
-        depth += nchars;
-        key += nchars;
+        TriePath::push_back(ptr, width, iterator);
+        key += width;
     }
-#endif
 
-    void dump(std::ostream & stream) const
+    void matched(int width)
     {
-        stream << "state: " << endl;
-        stream << "  key:   ";
+        key += width;
+    }
 
-        const char * old_key = key - depth();
+    void dump_key(std::ostream & stream) const
+    {
+        const char * old_key = key - width();
+
+        stream << "  old_key:   " << (void *)old_key << " ";
+
 
         for (unsigned i = 0;  i < 8;  ++i) {
-            if (i == depth()) stream << "| ";
+            if (i == width()) stream << "| ";
             stream << format("%02x ",
                              (old_key[i] < 0 ? old_key[i] + 256 : old_key[i]));
         }
         stream << endl;
 
-        stream << "  path:" << endl;
-        TriePath::dump(stream, 4);
+    }
+
+    void dump(std::ostream & stream) const
+    {
+        stream << "state: " << endl;
+        dump_key(stream);
+        TriePath::dump(stream, 2);
+    }
+
+    void dump(std::ostream & stream, TrieLeafOps & ops) const
+    {
+        stream << "state: " << endl;
+        dump_key(stream);
+        TriePath::dump(stream, ops, 2);
     }
 
     TrieLeafOps & leaf_ops;
@@ -407,7 +461,7 @@ struct DenseTrieBase {
         return true;
     }
     
-    value_type dereference(int16_t it) const
+    const value_type & dereference(int16_t it) const
     {
         if (it < 0 || it >= 256)
             throw Exception("set_ptr with null pointer");
@@ -415,6 +469,22 @@ struct DenseTrieBase {
             throw Exception("iterator with no presence");
 
         return children[it];
+    }
+
+    value_type & dereference(int16_t it)
+    {
+        if (it < 0 || it >= 256)
+            throw Exception("set_ptr with null pointer");
+        if (!presence[it])
+            throw Exception("iterator with no presence");
+
+        return children[it];
+    }
+
+    std::string print() const
+    {
+        string result = format("Dense node: population %zd", presence.count());
+        return result;
     }
 
     std::bitset<256> presence;  // one bit per leaf; says if it's there or not
@@ -465,9 +535,18 @@ struct SingleTrieBase {
     // null pointer.
     int16_t match(const char * key) const
     {
+        cerr << "match() for " << print() << endl;
+        cerr << "key = ";
         for (unsigned i = 0;  i < width_;  ++i)
-            if (key[i] != key_[i]) return false;
-        return true;
+            cerr << format("%02x ", (key[i] < 0 ? key[i] + 256 : key[i]));
+        cerr << endl;
+
+        for (unsigned i = 0;  i < width_;  ++i)
+            if (key[i] != key_[i]) return -1;
+
+        cerr << "MATCHED" << endl;
+
+        return 0;
     }
 
     // Insert width() characters from the key into the map.  Returns the
@@ -475,27 +554,50 @@ struct SingleTrieBase {
     // null; in this case the node was full and will need to be expanded.
     int16_t insert(const char * key)
     {
-        if (match(key)) return true;
-        return false;
+        return match(key);
     }
 
     void set_ptr(int16_t it, Payload new_ptr)
     {
-        if (!it)
+        if (it < -1 || it > 0)
+            throw Exception("not_null(): invalid iterator");
+        if (it != 0)
             throw Exception("set_ptr but pointer doesn't exist");
         payload_ = new_ptr;
     }
 
     bool not_null(int16_t it) const
     {
-        return it;
+        if (it < -1 || it > 0)
+            throw Exception("not_null(): invalid iterator");
+        return it == 0;
     }
     
-    value_type dereference(int16_t it) const
+    const value_type & dereference(int16_t it) const
     {
-        if (!it)
+        if (it < -1 || it > 0)
+            throw Exception("not_null(): invalid iterator");
+        if (it == -1)
             throw Exception("dereferenced null ptr");
         return payload_;
+    }
+
+    value_type & dereference(int16_t it)
+    {
+        if (it < -1 || it > 0)
+            throw Exception("not_null(): invalid iterator");
+        if (it == -1)
+            throw Exception("dereferenced null ptr");
+        return payload_;
+    }
+
+    std::string print() const
+    {
+        string result = format("Single node: width %d key ", width_);
+        for (unsigned i = 0;  i < width_;  ++i)
+            result += format("%02x ", (key_[i] < 0 ? key_[i] + 256 : key_[i]));
+        //result += " payload " + ostream_format(payload_);
+        return result;
     }
 
     uint8_t width_;
@@ -520,66 +622,6 @@ struct SingleTrieNode : public SingleTrieBase<TriePtr> {
         return payload_.size(ops);
     }
 };
-
-#if 0
-template<typename Payload>
-struct SparseTrieBase {
-
-    static int width()
-    {
-        return width;
-    }
-
-    uint8_t capacity;
-    uint8_t size;
-    uint8_t width;
-
-
-    typedef Payload value_type;
-    typedef value_type * iterator;
-    typedef const value_type * const_iterator;
-
-    // Attempt to match width() characters from the key.  If it matches, then
-    // return a pointer to the next node.  If there was no match, return a
-    // null pointer.
-    const_iterator match(const char * key) const
-    {
-        int index = *key;
-        if (index < 0) index += 256;
-        if (!presence[index]) return 0;
-        return &children[index];
-    }
-
-    // Insert width() characters from the key into the map.  Returns the
-    // iterator to access the next level.  Note that the iterator may be
-    // null; in this case the node was full and will need to be expanded.
-    iterator insert(const char * key)
-    {
-        int index = *key;
-        if (index < 0) index += 256;
-        if (!presence[index]) presence.set(index);
-        return &children[index];
-    }
-
-    void set_ptr(iterator it, Payload new_ptr)
-    {
-        *it = new_ptr;
-    }
-
-    bool not_null(const_iterator it) const
-    {
-        return it;
-    }
-    
-    value_type dereference(const_iterator it) const
-    {
-        return *it;
-    }
-
-    std::bitset<256> presence;  // one bit per leaf; says if it's there or not
-    Payload children[256];
-};
-#endif
 
 
 /*****************************************************************************/
@@ -753,9 +795,9 @@ free(TrieAllocator & allocator, TrieLeafOps & ops)
 template<typename T>
 int
 TriePtr::
-width_as(TriePtr ptr) const
+width_as() const
 {
-    T * o = ptr.as<T>();
+    T * o = as<T>();
     return o->width();
 }
 
@@ -765,7 +807,28 @@ width(TrieLeafOps & ops) const
 {
     if (!ptr) return 0;
     if (is_leaf) return ops.width(*this);
-    else TRIE_SWITCH_ON_NODE(width_as, (*this));
+    TRIE_SWITCH_ON_NODE(return width_as, ());
+}
+
+std::string
+TriePtr::
+print() const
+{
+    string result = format("%012x %c %d", ptr, (is_leaf ? 'l' : 'n'), type);
+    //if (!is_leaf)
+    //    TRIE_SWITCH_ON_NODE(return result + " " + as, ()->print());
+    return result;
+}
+
+std::string
+TriePtr::
+print(TrieLeafOps & ops) const
+{
+    string result = print();
+    if (!ptr) return result;
+    if (is_leaf) return result + " " + ops.print(*this);
+    TRIE_SWITCH_ON_NODE(return result + " " + as, ()->print());
+    throw Exception("how did we get here?");
 }
 
 
@@ -816,7 +879,7 @@ struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
         throw Exception("not leaf");                                    \
     switch (type) {                                                     \
     case DenseTrieNode::node_type: action<DenseTrieLeaf> args;  break;  \
-    case SingleTrieNode::node_type: action<SingleTrieLeaf> args;  break; \
+    case SingleTrieNode::node_type: action<SingleTrieLeaf> args;  break;\
     default: throw Exception("unknown leaf type");                      \
     }                                                                   \
     } while (0)
@@ -833,24 +896,20 @@ struct Trie {
         
         virtual TriePtr new_branch(TrieState & state)
         {
-            // To create a new branch, we create nodes all the way up to a leaf,
-            // and finish it off with the leaf.
-
-            if (state.depth() == 7) {
-                // We need a leaf
-                TriePtr result;  // null to make sure it's created
-                return insert(result, state);
-            }
+            cerr << "new_branch: state " << endl;
+            state.dump(cerr, *this);
 
             // A single thing to insert, so we do a single leaf
             SingleTrieLeaf * new_leaf
                 = state.allocator.create<SingleTrieLeaf>();
             
-            new_leaf->width_ = 8 - state.depth();
+            new_leaf->width_ = 9 - state.depth();
             for (unsigned i = 0;  i < new_leaf->width_;  ++i)
                 new_leaf->key_[i] = state.key[i];
             new_leaf->payload_ = 0;
             
+            state.matched(new_leaf->width_);
+
             TriePtr result;
             result.set_leaf(new_leaf);
             return result;
@@ -912,7 +971,6 @@ struct Trie {
         virtual TriePtr insert(TriePtr ptr, TrieState & state)
         {
             TRIE_SWITCH_ON_LEAF(return insert_as, ptr.type, (ptr, state));
-            
         }
         
         template<typename Leaf>
@@ -937,6 +995,89 @@ struct Trie {
         virtual int width(TriePtr ptr) const
         {
             TRIE_SWITCH_ON_LEAF(return width_as, ptr.type, (ptr));
+        }
+
+        template<typename Leaf>
+        uint64_t & dereference_as(TriePtr ptr, uint16_t iterator)
+        {
+            Leaf * l = ptr.as<Leaf>();
+            return l->dereference(iterator);
+        }
+
+        uint64_t & dereference(TriePtr ptr, uint16_t iterator)
+        {
+            TRIE_SWITCH_ON_LEAF(return dereference_as, ptr.type, (ptr, iterator));
+        }
+
+        template<typename Leaf>
+        std::string print_as(TriePtr ptr) const
+        {
+            Leaf * l = ptr.as<Leaf>();
+            return l->print();
+        }
+
+        virtual std::string print(TriePtr ptr) const
+        {
+            TRIE_SWITCH_ON_LEAF(return print_as, ptr.type, (ptr));
+        }
+    };
+    
+    struct TrieIterator
+        : public boost::iterator_facade<TrieIterator,
+                                        uint64_t,
+                                        boost::bidirectional_traversal_tag> {
+        
+        uint64_t key() const
+        {
+            LeafOps ops;
+
+            if (path_.width() != 8)
+                throw Exception("key() on not fully inserted path");
+
+            uint64_t result = 0;
+            char * p = (char *)&result;
+
+            for (unsigned i = 0;  i < path_.depth();  ++i) {
+                const TriePath::Entry & entry = path_.at_depth(i);
+                entry.ptr.key(ops, entry.iterator, p);
+                p += entry.width;
+            }
+
+            return result;
+        }
+        
+        uint64_t & value() const
+        {
+            if (path_.width() != 8)
+                throw Exception("key() on not fully inserted path");
+
+            LeafOps ops;
+            return ops.dereference(path_.back().ptr, path_.back().iterator);
+        }
+        
+    private:
+        TriePath path_;
+
+        bool equal(const TrieIterator & other) const
+        {
+            // If their back elements are equal then the two are equal
+            if (path_.depth() == 0 && other.path_.depth() == 0) return true;
+            return path_.back() == other.path_.back();
+        }
+        
+        uint64_t & dereference() const
+        {
+            return value();
+        }
+
+        void increment()
+        {
+            throw Exception("increment not done");
+        }
+        
+        void decrement()
+        {
+            throw Exception("decrement not done");
         }
     };
 
@@ -967,13 +1108,20 @@ struct Trie {
         LeafOps ops;
 
         TrieState state(key, itl.root, ops, itl.allocator());
+
+        cerr << "state init" << endl;
+        state.dump(cerr, ops);
+
         TriePtr val = itl.root.insert(state);
+
         if (itl.root != val) {
             itl.root = val;
             state.replace_at_depth(0, val, val.width(ops));
         }
 
-        cerr << "final state: " << state << endl;
+        cerr << "final state: " << endl;
+        state.dump(cerr, ops);
+        cerr << endl;
 
         return ops.dereference(state.back().ptr, state.back().iterator);
     }
