@@ -250,6 +250,11 @@ std::ostream & operator << (std::ostream & stream, const TriePtr & p)
 
 // A path through a trie.  Gives the basis for an iterator.
 struct TriePath {
+    TriePath()
+        : width_(0), depth_(0)
+    {
+    }
+
     TriePath(TriePtr root, int width)
         : width_(0), depth_(0)
     {
@@ -262,8 +267,19 @@ struct TriePath {
         int16_t width;
     };
 
-    Entry & back() { return entries_[depth_ - 1]; }
-    const Entry & back() const { return entries_[depth_ - 1]; }
+    Entry & back()
+    {
+        if (depth_ == 0)
+            throw Exception("back() with empty TriePath");
+        return entries_[depth_ - 1];
+    }
+
+    const Entry & back() const
+    {
+        if (depth_ == 0)
+            throw Exception("back() with empty TriePath");
+        return entries_[depth_ - 1];
+    }
 
     int depth() const { return depth_; }
     int width() const { return width_; }
@@ -350,9 +366,8 @@ private:
 
 struct TrieState : public TriePath {
 
-    TrieState(const TrieKey & key, TriePtr root, TrieOps & leaf_ops)
-        : TriePath(root, root.width(leaf_ops)),
-          key(key)
+    TrieState(const TrieKey & key)
+        : key(key)
     {
     }
     
@@ -511,6 +526,8 @@ struct SingleTrieBase {
     int16_t match(const TrieKey & key, int done_width)
     {
         cerr << "match() for " << print() << endl;
+        cerr << "done_width " << done_width << " width_ = " << width_
+             << endl;
         cerr << "key = " << key.print(done_width) << endl;
 
         for (unsigned i = 0;  i < width_;  ++i)
@@ -880,13 +897,14 @@ struct Trie {
             SingleTrieLeaf * new_leaf
                 = ops.create<SingleTrieLeaf>();
             
-            new_leaf->width_ = 9 - state.depth();
+            new_leaf->width_ = 8 - state.depth();
             for (unsigned i = 0;  i < new_leaf->width_;  ++i)
                 new_leaf->key_[i] = state.key[i];
             new_leaf->payload_ = 0;
             
             TriePtr result;
             result.set_leaf(new_leaf);
+            state.push_back(result, new_leaf->width_);
             return result;
         }
         
@@ -940,6 +958,8 @@ struct Trie {
             
             TriePtr result;
             result.set_leaf(l);
+            state.push_back(result, l->width());
+
             return result;
         }
         
@@ -1067,17 +1087,14 @@ struct Trie {
     uint64_t & operator [] (uint64_t key)
     {
         LeafOps ops(this);
-        TrieState state(key, itl.root, ops);
+        TrieState state(key);
 
         cerr << "state init" << endl;
         state.dump(cerr, ops);
 
         TriePtr val = itl.root.insert(ops, state);
 
-        if (itl.root != val) {
-            itl.root = val;
-            state.replace_at_depth(0, val, val.width(ops));
-        }
+        if (itl.root != val) itl.root = val;
 
         cerr << "final state: " << endl;
         state.dump(cerr, ops);
