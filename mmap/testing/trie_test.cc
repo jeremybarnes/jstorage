@@ -64,9 +64,47 @@ struct TrieAllocator {
 };
 
 struct TrieKey {
-    char key_[8];
-    int len_;
+    TrieKey(uint64_t val = 0)
+        : bits_(val)
+    {
+    }
+
+    TrieKey(const char * val)
+    {
+        for (unsigned i = 0;  i < 8;  ++i)
+            chars_[i] = val[i];
+    }
+
+    unsigned char operator [] (unsigned index) const
+    {
+        if (index >= 8)
+            throw Exception("TrieKey: invalid index");
+        return chars_[index];
+    }
+
+    union {
+        unsigned char chars_[8];
+        uint64_t bits_;
+    };
+
+    std::string print(int width = -1) const
+    {
+        std::string result;
+
+        for (unsigned i = 0;  i < 8;  ++i) {
+            if (i == width) result += "| ";
+            result += format("%02x ", chars_[i]);
+        }
+
+        return result;
+    }
 };
+
+std::ostream & operator << (std::ostream & stream, const TrieKey & key)
+{
+    return stream << key.print();
+}
+
 
 // Operations structure to do with the leaves.  Allows the client to control
 // how the data is stored in the leaves.
@@ -312,7 +350,7 @@ private:
 
 struct TrieState : public TriePath {
 
-    TrieState(const char * key, TriePtr root, TrieOps & leaf_ops)
+    TrieState(const TrieKey & key, TriePtr root, TrieOps & leaf_ops)
         : TriePath(root, root.width(leaf_ops)),
           key(key)
     {
@@ -322,46 +360,19 @@ struct TrieState : public TriePath {
     {
     }
 
-    const char * key;
-
-    void push_back(TriePtr ptr, int width, int iterator = 0)
-    {
-        TriePath::push_back(ptr, width, iterator);
-        key += width;
-    }
-
-    void matched(int width)
-    {
-        key += width;
-    }
-
-    void dump_key(std::ostream & stream) const
-    {
-        const char * old_key = key - width();
-
-        stream << "  old_key:   " << (void *)old_key << " ";
-
-
-        for (unsigned i = 0;  i < 8;  ++i) {
-            if (i == width()) stream << "| ";
-            stream << format("%02x ",
-                             (old_key[i] < 0 ? old_key[i] + 256 : old_key[i]));
-        }
-        stream << endl;
-
-    }
+    TrieKey key;
 
     void dump(std::ostream & stream) const
     {
         stream << "state: " << endl;
-        dump_key(stream);
+        stream << "  key: " << key.print(width()) << endl;
         TriePath::dump(stream, 2);
     }
 
     void dump(std::ostream & stream, TrieOps & ops) const
     {
         stream << "state: " << endl;
-        dump_key(stream);
+        stream << "  key: " << key.print(width()) << endl;
         TriePath::dump(stream, ops, 2);
     }
 };
@@ -387,10 +398,9 @@ struct DenseTrieBase {
     // Attempt to match width() characters from the key.  If it matches, then
     // return a pointer to the next node.  If there was no match, return a
     // null pointer.
-    int16_t match(const char * key) const
+    int16_t match(const TrieKey & key, int done_width) const
     {
-        int index = *key;
-        if (index < 0) index += 256;
+        int index = key[done_width];
         if (!presence[index]) return -1;
         return index;
     }
@@ -398,11 +408,10 @@ struct DenseTrieBase {
     // Insert width() characters from the key into the map.  Returns the
     // iterator to access the next level.  Note that the iterator may be
     // null; in this case the node was full and will need to be expanded.
-    int16_t insert(const char * key)
+    int16_t insert(const TrieKey & key, int done_width)
     {
-        int index = *key;
-        if (index < 0) index += 256;
-        if (!presence[index]) return -1;
+        int index = key[done_width];
+        if (!presence[index]) presence[index] = true;
         return index;
     }
 
@@ -499,16 +508,13 @@ struct SingleTrieBase {
     // Attempt to match width() characters from the key.  If it matches, then
     // return a pointer to the next node.  If there was no match, return a
     // null pointer.
-    int16_t match(const char * key) const
+    int16_t match(const TrieKey & key, int done_width)
     {
         cerr << "match() for " << print() << endl;
-        cerr << "key = ";
-        for (unsigned i = 0;  i < width_;  ++i)
-            cerr << format("%02x ", (key[i] < 0 ? key[i] + 256 : key[i]));
-        cerr << endl;
+        cerr << "key = " << key.print(done_width) << endl;
 
         for (unsigned i = 0;  i < width_;  ++i)
-            if (key[i] != key_[i]) return -1;
+            if (key[i + done_width] != key_[i]) return -1;
 
         cerr << "MATCHED" << endl;
 
@@ -518,9 +524,9 @@ struct SingleTrieBase {
     // Insert width() characters from the key into the map.  Returns the
     // iterator to access the next level.  Note that the iterator may be
     // null; in this case the node was full and will need to be expanded.
-    int16_t insert(const char * key)
+    int16_t insert(const TrieKey & key, int done_width)
     {
-        return match(key);
+        return match(key, done_width);
     }
 
     void set_ptr(int16_t it, Payload new_ptr)
@@ -664,7 +670,7 @@ do_insert_as(TrieOps & ops, TrieState & state)
 
     if (!ptr) node = ops.create<Node>();
 
-    int16_t found = node->insert(state.key);
+    int16_t found = node->insert(state.key, state.width());
 
     if (node->not_null(found)) {
         TriePtr child = TriePtr(node->dereference(found));
@@ -879,8 +885,6 @@ struct Trie {
                 new_leaf->key_[i] = state.key[i];
             new_leaf->payload_ = 0;
             
-            state.matched(new_leaf->width_);
-
             TriePtr result;
             result.set_leaf(new_leaf);
             return result;
@@ -932,7 +936,7 @@ struct Trie {
             Leaf * l = ptr.as<Leaf>();
             if (!l) l = ops.create<Leaf>();
             
-            l->insert(state.key);
+            l->insert(state.key, state.width());
             
             TriePtr result;
             result.set_leaf(l);
