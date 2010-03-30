@@ -10,6 +10,7 @@
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"
+#include "jml/arch/exception_handler.h"
 #include "jml/arch/vm.h"
 #include "jml/utils/unnamed_bool.h"
 #include "jml/utils/testing/testing_allocator.h"
@@ -40,7 +41,7 @@ struct TrieAllocator {
 
     virtual void * allocate(size_t bytes) = 0;
     virtual void deallocate(void * mem, size_t bytes) = 0;
-
+    
     template<typename T>
     T * create()
     {
@@ -247,6 +248,7 @@ BOOST_AUTO_TEST_CASE( test_trie_key )
         for (unsigned i = 0;  i < 8;  ++i)
             BOOST_CHECK_EQUAL(key2[i], chars[i]);
 
+        JML_TRACE_EXCEPTIONS(false);
         BOOST_CHECK_THROW(key[-1], Exception);
         BOOST_CHECK_THROW(key[8], Exception);
         BOOST_CHECK_THROW(key2[-1], Exception);
@@ -577,6 +579,11 @@ std::ostream & operator << (std::ostream & stream, const TrieState & state)
     return stream;
 }
 
+
+/*****************************************************************************/
+/* DENSE TRIE NODES                                                          */
+/*****************************************************************************/
+
 template<typename Payload>
 struct DenseTrieBase {
 
@@ -693,6 +700,11 @@ struct DenseTrieNode : public DenseTrieBase<TriePtr> {
     }
 
 };
+
+
+/*****************************************************************************/
+/* SINGLE TRIE NODE                                                          */
+/*****************************************************************************/
 
 template<typename Payload>
 struct SingleTrieBase {
@@ -846,12 +858,15 @@ struct SingleTrieNode : public SingleTrieBase<TriePtr> {
 };
 
 
+/*****************************************************************************/
+/* MULTI TRIE NODE                                                           */
+/*****************************************************************************/
 
 template<typename Payload>
 struct MultiTrieBase {
 
-    MultiTrieBase()
-        : width_(0), size_(0)
+    MultiTrieBase(int width = 0)
+        : width_(width), size_(0)
     {
     }
 
@@ -871,7 +886,7 @@ struct MultiTrieBase {
 
     Entry entries_[NUM_ENTRIES];
 
-    int width()
+    int width() const
     {
         return width_;
     }
@@ -907,7 +922,7 @@ struct MultiTrieBase {
             = std::lower_bound(entries_, entries_ + size_,
                                key, FindKey(done_width, width_));
         if (entry == entries_ + size_
-            && !TrieKey::equal_ranges(key, done_width, entry->key, 0, width_))
+            || !TrieKey::equal_ranges(key, done_width, entry->key, 0, width_))
             return -1;
         
         return entry - entries_;
@@ -918,25 +933,39 @@ struct MultiTrieBase {
     // null; in this case the node was full and will need to be expanded.
     int16_t insert(const TrieKey & key, int done_width)
     {
-        if (size_ == 0)
-            throw Exception("Empty entry");
+        cerr << "  insert " << key << endl;
 
         Entry * entry
             = std::lower_bound(entries_, entries_ + size_,
                                key, FindKey(done_width, width_));
 
+        cerr << "    entry offset " << entry - entries_
+             << "  key " << entry->key << endl;
 
         if (entry != entries_ + size_
             && TrieKey::equal_ranges(key, done_width, entry->key, 0, width_)) {
+
             return entry - entries_;
         }
 
         if (size_ == NUM_ENTRIES) // full
             return -1;  // need to expand to another kind of node...
 
+        cerr << "  moving" << endl;
+
+        cerr << "  before move" << endl;
+        dump(cerr);
+
         // Move everything after forward
-        for (Entry * it = entries_ + size_ - 1;  it > entry;  --it)
+        for (Entry * it = entries_ + size_ - 1;  it >= entry;  --it) {
+            cerr << "    moving " << it - entries_ << " forward" << endl;
             it[1] = it[0];
+        }
+
+        cerr << "  after move" << endl;
+        dump(cerr);
+
+        cerr << "  initializing" << endl;
 
         // Initialize the new entry
         entry->key.init(key, done_width, width_);
@@ -986,9 +1015,23 @@ struct MultiTrieBase {
         return result;
     }
 
+    void dump(std::ostream & stream) const
+    {
+        stream << "Multi node: width=" << width() << " size = " << size()
+               << endl;
+        for (unsigned i = 0;  i < size_;  ++i)
+            stream << "  " << entries_[i].key << " --> " << entries_[i].payload
+                   << endl;
+    }
+
     TriePtr expand(const TrieOps & ops, TrieState & state)
     {
         throw Exception("Multi Node Expand");
+    }
+
+    size_t size() const
+    {
+        return size_;
     }
 };
 
@@ -1017,6 +1060,72 @@ struct MultiTrieNode : public MultiTrieBase<TriePtr> {
     }
 };
 
+BOOST_AUTO_TEST_CASE( test_multi_trie_node )
+{
+    MultiTrieBase<uint64_t> node(8);  // width of 8
+    BOOST_CHECK_EQUAL(node.width(), 8);
+    BOOST_CHECK_EQUAL(node.size(), 0);
+
+    int i = 0;
+    TrieKey key1(i);
+    int16_t place = node.match(key1, 0);
+    BOOST_CHECK_EQUAL(place, -1);
+    BOOST_CHECK(!node.not_null(place));
+
+    {
+        JML_TRACE_EXCEPTIONS(false);
+        BOOST_CHECK_THROW(node.dereference(place), Exception);
+    }
+
+    place = node.insert(key1, 0);
+    BOOST_CHECK_EQUAL(node.size_, 1);
+    BOOST_CHECK_EQUAL(place, 0);
+    BOOST_CHECK(node.not_null(place));
+    node.dereference(place) = 10;
+    BOOST_CHECK_EQUAL(node.dereference(place), 10);
+    
+    cerr << "after one insertion" << endl;
+    node.dump(cerr);
+
+    TrieKey key2("01234567");
+    int place2 = node.match(key2, 0);
+    BOOST_CHECK_EQUAL(place2, -1);
+    place2 = node.insert(key2, 0);
+
+    BOOST_CHECK_EQUAL(place2, 1);
+    BOOST_CHECK_EQUAL(node.size_, 2);
+    node.dereference(place2) = 20;
+
+    cerr << "after two insertions" << endl;
+    node.dump(cerr);
+
+    BOOST_CHECK_EQUAL(node.dereference(node.match(key1, 0)), 10);
+    BOOST_CHECK_EQUAL(node.dereference(node.match(key2, 0)), 20);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key1, 0)), 10);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key2, 0)), 20);
+
+    TrieKey key3("01230000");
+
+    BOOST_CHECK_EQUAL(node.match(key3, 0), -1);
+    int place3 = node.insert(key3, 0);
+
+    cerr << "after three insertions" << endl;
+    node.dump(cerr);
+
+    BOOST_CHECK_EQUAL(place3, 1);
+    node.dereference(place3) = 15;
+    BOOST_CHECK_EQUAL(node.match(key1, 0), 0);
+    BOOST_CHECK_EQUAL(node.match(key2, 0), 2);
+    BOOST_CHECK_EQUAL(node.match(key3, 0), 1);
+    BOOST_CHECK_EQUAL(node.insert(key1, 0), 0);
+    BOOST_CHECK_EQUAL(node.insert(key2, 0), 2);
+    BOOST_CHECK_EQUAL(node.insert(key3, 0), 1);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key1, 0)), 10);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key3, 0)), 15);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key2, 0)), 20);
+    
+}
+
 
 /*****************************************************************************/
 /* TRIEPTR                                                                   */
@@ -1029,8 +1138,8 @@ struct MultiTrieNode : public MultiTrieBase<TriePtr> {
     do {                                                                \
     switch (type) {                                                     \
     case DenseTrieNode::node_type: action<DenseTrieNode> args;  break;  \
-    case SingleTrieNode::node_type: action<SingleTrieNode> args;  break; \
-    case MultiTrieNode::node_type: action<MultiTrieNode> args;  break; \
+    case SingleTrieNode::node_type: action<SingleTrieNode> args;  break;\
+    case MultiTrieNode::node_type: action<MultiTrieNode> args;  break;  \
     default: throw Exception("unknown node type");                      \
     }                                                                   \
     } while (0)
