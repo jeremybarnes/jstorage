@@ -933,39 +933,20 @@ struct MultiTrieBase {
     // null; in this case the node was full and will need to be expanded.
     int16_t insert(const TrieKey & key, int done_width)
     {
-        cerr << "  insert " << key << endl;
-
         Entry * entry
             = std::lower_bound(entries_, entries_ + size_,
                                key, FindKey(done_width, width_));
 
-        cerr << "    entry offset " << entry - entries_
-             << "  key " << entry->key << endl;
-
         if (entry != entries_ + size_
-            && TrieKey::equal_ranges(key, done_width, entry->key, 0, width_)) {
-
+            && TrieKey::equal_ranges(key, done_width, entry->key, 0, width_))
             return entry - entries_;
-        }
 
         if (size_ == NUM_ENTRIES) // full
             return -1;  // need to expand to another kind of node...
 
-        cerr << "  moving" << endl;
-
-        cerr << "  before move" << endl;
-        dump(cerr);
-
         // Move everything after forward
-        for (Entry * it = entries_ + size_ - 1;  it >= entry;  --it) {
-            cerr << "    moving " << it - entries_ << " forward" << endl;
+        for (Entry * it = entries_ + size_ - 1;  it >= entry;  --it)
             it[1] = it[0];
-        }
-
-        cerr << "  after move" << endl;
-        dump(cerr);
-
-        cerr << "  initializing" << endl;
 
         // Initialize the new entry
         entry->key.init(key, done_width, width_);
@@ -1084,9 +1065,6 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
     node.dereference(place) = 10;
     BOOST_CHECK_EQUAL(node.dereference(place), 10);
     
-    cerr << "after one insertion" << endl;
-    node.dump(cerr);
-
     TrieKey key2("01234567");
     int place2 = node.match(key2, 0);
     BOOST_CHECK_EQUAL(place2, -1);
@@ -1095,9 +1073,6 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
     BOOST_CHECK_EQUAL(place2, 1);
     BOOST_CHECK_EQUAL(node.size_, 2);
     node.dereference(place2) = 20;
-
-    cerr << "after two insertions" << endl;
-    node.dump(cerr);
 
     BOOST_CHECK_EQUAL(node.dereference(node.match(key1, 0)), 10);
     BOOST_CHECK_EQUAL(node.dereference(node.match(key2, 0)), 20);
@@ -1109,9 +1084,6 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
     BOOST_CHECK_EQUAL(node.match(key3, 0), -1);
     int place3 = node.insert(key3, 0);
 
-    cerr << "after three insertions" << endl;
-    node.dump(cerr);
-
     BOOST_CHECK_EQUAL(place3, 1);
     node.dereference(place3) = 15;
     BOOST_CHECK_EQUAL(node.match(key1, 0), 0);
@@ -1121,6 +1093,26 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
     BOOST_CHECK_EQUAL(node.insert(key2, 0), 2);
     BOOST_CHECK_EQUAL(node.insert(key3, 0), 1);
     BOOST_CHECK_EQUAL(node.dereference(node.insert(key1, 0)), 10);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key3, 0)), 15);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key2, 0)), 20);
+    
+    TrieKey key4("01200000");
+
+    BOOST_CHECK_EQUAL(node.match(key4, 0), -1);
+    int place4 = node.insert(key4, 0);
+
+    BOOST_CHECK_EQUAL(place4, 1);
+    node.dereference(place4) = 12;
+    BOOST_CHECK_EQUAL(node.match(key1, 0), 0);
+    BOOST_CHECK_EQUAL(node.match(key2, 0), 3);
+    BOOST_CHECK_EQUAL(node.match(key3, 0), 2);
+    BOOST_CHECK_EQUAL(node.match(key4, 0), 1);
+    BOOST_CHECK_EQUAL(node.insert(key1, 0), 0);
+    BOOST_CHECK_EQUAL(node.insert(key2, 0), 3);
+    BOOST_CHECK_EQUAL(node.insert(key3, 0), 2);
+    BOOST_CHECK_EQUAL(node.insert(key4, 0), 1);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key1, 0)), 10);
+    BOOST_CHECK_EQUAL(node.dereference(node.insert(key4, 0)), 12);
     BOOST_CHECK_EQUAL(node.dereference(node.insert(key3, 0)), 15);
     BOOST_CHECK_EQUAL(node.dereference(node.insert(key2, 0)), 20);
     
