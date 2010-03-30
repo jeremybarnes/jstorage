@@ -25,6 +25,7 @@
 #include <fstream>
 #include <vector>
 #include <bitset>
+#include <map>
 
 
 using namespace ML;
@@ -989,6 +990,15 @@ struct MultiTrieBase {
             throw Exception("dereferenced null ptr");
         return entries_[it].payload;
     }
+
+    TrieKey extract_key(int16_t it) const
+    {
+        if (it < -1 || it >= size_)
+            throw Exception("not_null(): invalid iterator");
+        if (it == -1)
+            throw Exception("dereferenced null ptr");
+        return entries_[it].key;
+    }
     
     std::string print() const
     {
@@ -1115,7 +1125,85 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
     BOOST_CHECK_EQUAL(node.dereference(node.insert(key4, 0)), 12);
     BOOST_CHECK_EQUAL(node.dereference(node.insert(key3, 0)), 15);
     BOOST_CHECK_EQUAL(node.dereference(node.insert(key2, 0)), 20);
-    
+
+    // Stress test: different lengths; using a map to check results
+    for (unsigned l = 1;  l <= 8;  ++l) {
+        cerr << "l = " << l << endl;
+        
+        MultiTrieBase<uint64_t> node(l);
+        map<string, uint64_t> check_against;
+        
+        for (int i = 0;  i < MultiTrieBase<uint64_t>::NUM_ENTRIES + 5;  ++i) {
+            // Create a new entry
+            string key;
+            for (unsigned j = 0;  j < l;  ++j)
+                key.push_back(random());
+            
+            if (check_against.count(key)) {
+                --i;
+                continue;
+            }
+            
+            if (i >= MultiTrieBase<uint64_t>::NUM_ENTRIES) {
+                // insert should fail
+                
+                while (key.length() != 8)
+                    key.push_back(random());
+
+                TrieKey tkey(key.c_str());
+                
+                int place = node.insert(tkey, 0);
+                BOOST_CHECK_EQUAL(place, -1);
+                continue;
+            }
+
+            check_against[key] = i;
+
+            // Add some junk to the end, which should be ignored
+            while (key.length() != 8)
+                key.push_back(random());
+
+            TrieKey tkey(key.c_str());
+            
+            int place = node.insert(tkey, 0);
+            BOOST_CHECK(node.not_null(place));
+            node.dereference(place) = i;
+
+            BOOST_CHECK_EQUAL(node.size(), i + 1);
+        }
+
+        node.dump(cerr);
+        cerr << endl;
+
+        cerr << "map with " << check_against.size() << " entries" << endl;
+        int i = 0;
+        for (map<string, uint64_t>::const_iterator
+                 it = check_against.begin(), end = check_against.end();
+             it != end;  ++it, ++i) {
+            string k = it->first;
+            while (k.length() < 8)
+                k.push_back(0);
+            TrieKey key(k.c_str());
+            cerr << "  " << i << " " << key << " --> " << it->second << endl;
+        }
+        // They should be sorted in the same order
+
+        i = 0;
+        for (map<string, uint64_t>::const_iterator
+                 it = check_against.begin(), end = check_against.end();
+             it != end;  ++it, ++i) {
+            uint64_t val = node.dereference(i);
+            BOOST_CHECK_EQUAL(val, it->second);
+
+            string s = it->first;
+            while (s.length() < 8)
+                s += ' ';
+            TrieKey tkey(s.c_str());
+            TrieKey k = node.extract_key(i);
+
+            BOOST_CHECK(TrieKey::equal_ranges(tkey, 0, k, 0, l));
+        }
+    }
 }
 
 
