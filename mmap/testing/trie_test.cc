@@ -806,6 +806,9 @@ struct SingleTrieBase {
 
     TriePtr expand(const TrieOps & ops, TrieState & state)
     {
+        // Simply convert to a multi node, then insert it
+        
+
         // Which character differs?
         int i = 0;
         for (;  i < width_;  ++i) {
@@ -1393,31 +1396,6 @@ print(TrieOps & ops) const
 /* TRIE                                                                      */
 /*****************************************************************************/
 
-struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
-
-    size_t memusage()
-    {
-        return sizeof(*this);
-    }
-
-    size_t size()
-    {
-        return 1;
-    }
-};
-
-struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
-
-    size_t memusage()
-    {
-        return sizeof(*this);
-    }
-
-    size_t size()
-    {
-        return size_;
-    }
-};
 
 struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 
@@ -1430,6 +1408,51 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
     size_t size()
     {
         return presence.count();
+    }
+};
+
+struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
+
+    MultiTrieLeaf(int width = 0)
+        : MultiTrieBase<uint64_t>(width)
+    {
+    }
+
+    size_t memusage()
+    {
+        return sizeof(*this);
+    }
+
+    size_t size()
+    {
+        return size_;
+    }
+};
+
+struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
+
+    size_t memusage()
+    {
+        return sizeof(*this);
+    }
+
+    size_t size()
+    {
+        return 1;
+    }
+
+    TriePtr expand(TrieOps & ops, TrieState & state)
+    {
+        // Convert to a multi leaf
+        MultiTrieLeaf * new_leaf
+            = ops.create<MultiTrieLeaf>(width_);
+
+        // Insert us
+        new_leaf->insert(key_, 0);
+
+        TriePtr result;
+        result.set_leaf(new_leaf);
+        return result;
     }
 };
 
@@ -1552,8 +1575,10 @@ struct Trie {
                 return result;
             }
 
-            // Insert failed; we need to expand the current node
-            return expand_as<Leaf>(ptr, state);
+            // Insert failed; we need to expand the current node, and then
+            // insert it back in
+            TriePtr expanded = expand_as<Leaf>(ptr, state);
+            return insert(expanded, state);
         }
         
         virtual TriePtr insert(TriePtr ptr, TrieState & state)
@@ -1727,7 +1752,7 @@ size_t memusage(const Trie<Alloc> & trie)
     return trie.memusage();
 }
 
-#if 0
+#if 1
 
 BOOST_AUTO_TEST_CASE( test_trie )
 {
