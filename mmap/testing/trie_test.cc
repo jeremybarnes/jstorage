@@ -905,13 +905,6 @@ struct MultiTrieBase {
             return TrieKey::less_ranges(entry.key, 0, key,
                                         done_width, match_width);
         }
-
-#if 0
-        bool operator () (const Entry & entry, const TrieKey & key) const
-        {
-            return entry->key.less(key, done_width, match_width);
-        }
-#endif
     };
 
     // Attempt to match width() characters from the key.  If it matches, then
@@ -1128,7 +1121,7 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
 
     // Stress test: different lengths; using a map to check results
     for (unsigned l = 1;  l <= 8;  ++l) {
-        cerr << "l = " << l << endl;
+        //cerr << "l = " << l << endl;
         
         MultiTrieBase<uint64_t> node(l);
         map<string, uint64_t> check_against;
@@ -1172,6 +1165,7 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
             BOOST_CHECK_EQUAL(node.size(), i + 1);
         }
 
+#if 0
         node.dump(cerr);
         cerr << endl;
 
@@ -1187,8 +1181,8 @@ BOOST_AUTO_TEST_CASE( test_multi_trie_node )
             cerr << "  " << i << " " << key << " --> " << it->second << endl;
         }
         // They should be sorted in the same order
-
-        i = 0;
+#endif
+        int i = 0;
         for (map<string, uint64_t>::const_iterator
                  it = check_against.begin(), end = check_against.end();
              it != end;  ++it, ++i) {
