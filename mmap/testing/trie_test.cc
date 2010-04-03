@@ -315,6 +315,10 @@ struct TrieOps : public TrieAllocator {
 
     // Print a summary in a string
     virtual std::string print(TriePtr ptr) const = 0;
+
+    // Dump the entire tree to the given stream
+    virtual void dump(TriePtr ptr, std::ostream & stream, int indent,
+                      int first_indent = -1) const = 0;
 };
 
 struct TriePtr {
@@ -423,6 +427,9 @@ struct TriePtr {
     std::string print() const;
 
     std::string print(TrieOps & ops) const;
+
+    void dump(TrieOps & ops, std::ostream & stream, int indent,
+              int first_indent) const;
 };
 
 std::ostream & operator << (std::ostream & stream, const TriePtr & p)
@@ -700,6 +707,19 @@ struct DenseTrieNode : public DenseTrieBase<TriePtr> {
         return result;
     }
 
+    void dump(TrieOps & ops, std::ostream & stream, int indent,
+              int first_indent)
+    {
+        string i(indent, ' ');
+        if (first_indent) stream << i;
+        stream << print() << endl;
+        for (unsigned i = 0;  i < 256;  ++i) {
+            if (presence[i]) {
+                stream << "  " << format("%02x", i) << " --> ";
+                children[i].dump(ops, stream, indent + 4, 0);
+            }
+        }
+    }
 };
 
 
@@ -858,6 +878,15 @@ struct SingleTrieNode : public SingleTrieBase<TriePtr> {
     size_t size(TrieOps & ops) const
     {
         return payload_.size(ops);
+    }
+
+    void dump(TrieOps & ops, std::ostream & stream, int indent,
+              int first_indent)
+    {
+        string i(indent, ' ');
+        if (first_indent) stream << i;
+        stream << print() << endl;
+        payload_.dump(ops, stream, indent + 4, indent + 4);
     }
 };
 
@@ -1038,12 +1067,28 @@ struct MultiTrieNode : public MultiTrieBase<TriePtr> {
         return result;
     }
 
+    using MultiTrieBase<TriePtr>::size;
+
     size_t size(TrieOps & ops) const
     {
         size_t result = 0;
         for (unsigned i = 0;  i < size_;  ++i)
             result += entries_[i].payload.size(ops);
         return result;
+    }
+
+    void dump(TrieOps & ops, std::ostream & stream, int indent,
+              int first_indent)
+    {
+        string ind(indent, ' ');
+        
+        if (first_indent) stream << ind;
+        stream << "Multi node: width=" << width() << " size = " << size()
+               << endl;
+        for (unsigned i = 0;  i < size_;  ++i) {
+            stream << ind << "  " << entries_[i].key << " --> ";
+            entries_[i].payload.dump(ops, stream, indent + 4, 0);
+        }
     }
 };
 
@@ -1391,6 +1436,21 @@ print(TrieOps & ops) const
     throw Exception("how did we get here?");
 }
 
+void
+TriePtr::
+dump(TrieOps & ops, std::ostream & stream, int indent, int first_indent) const
+{
+    if (first_indent == -1) first_indent = indent;
+    string i(first_indent, ' ');
+
+    stream << i << print() << " ";
+    if (!ptr) { stream << endl;  return; }
+    if (is_leaf) { ops.dump(*this, stream, indent, first_indent);  return; }
+
+
+    TRIE_SWITCH_ON_NODE(as, ()->dump(ops, stream, indent, 0));
+}
+
 
 /*****************************************************************************/
 /* TRIE                                                                      */
@@ -1409,6 +1469,19 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
     {
         return presence.count();
     }
+
+    void dump(std::ostream & stream, int indent, int first_indent)
+    {
+        string i(indent, ' ');
+        if (first_indent) stream << i;
+        stream << print() << endl;
+        for (unsigned i = 0;  i < 256;  ++i) {
+            if (presence[i]) {
+                stream << "  " << format("%02x", i) << " --> "
+                       << children[i] << endl;
+            }
+        }
+    }
 };
 
 struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
@@ -1426,6 +1499,19 @@ struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
     size_t size()
     {
         return size_;
+    }
+
+    void dump(std::ostream & stream, int indent, int first_indent)
+    {
+        string ind(indent, ' ');
+        
+        if (first_indent) stream << ind;
+        stream << "Multi leaf: width=" << width() << " size = " << size()
+               << endl;
+        for (unsigned i = 0;  i < size_;  ++i) {
+            stream << ind << "  " << entries_[i].key << " --> "
+                   << entries_[i].payload << endl;
+        }
     }
 };
 
@@ -1448,11 +1534,19 @@ struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
             = ops.create<MultiTrieLeaf>(width_);
 
         // Insert us
-        new_leaf->insert(key_, 0);
+        new_leaf->dereference(new_leaf->insert(key_, 0)) = payload_;
 
         TriePtr result;
         result.set_leaf(new_leaf);
         return result;
+    }
+
+    void dump(std::ostream & stream, int indent, int first_indent)
+    {
+        string ind(indent, ' ');
+        
+        if (first_indent) stream << ind;
+        stream << print() << " --> " << payload_ << endl;
     }
 };
 
@@ -1578,6 +1672,10 @@ struct Trie {
             // Insert failed; we need to expand the current node, and then
             // insert it back in
             TriePtr expanded = expand_as<Leaf>(ptr, state);
+
+            // Free the current pointer
+            destroy(l);
+
             return insert(expanded, state);
         }
         
@@ -1644,6 +1742,13 @@ struct Trie {
         virtual std::string print(TriePtr ptr) const
         {
             TRIE_SWITCH_ON_LEAF(return print_as, ptr.type, (ptr));
+        }
+
+        virtual void dump(TriePtr ptr, std::ostream & stream,
+                          int indent, int first_indent) const
+        {
+            TRIE_SWITCH_ON_LEAF(ptr.as, ptr.type,
+                                ()->dump(stream, indent, first_indent));
         }
     };
     
@@ -1744,6 +1849,13 @@ struct Trie {
         LeafOps ops(this);
         return itl.root.memusage(ops);
     }
+
+    void dump(std::ostream & stream, int indent = 0, int first_indent = -1)
+    {
+        LeafOps ops(this);
+        if (first_indent == -1) first_indent = indent;
+        itl.root.dump(ops, stream, indent, first_indent);
+    }
 };
 
 template<typename Alloc>
@@ -1758,12 +1870,20 @@ BOOST_AUTO_TEST_CASE( test_trie )
 {
     Trie<> trie;
 
+    cerr << "------ empty ------" << endl;
+    trie.dump(cerr);
+    cerr << "-------------------" << endl << endl;
+
     BOOST_CHECK_EQUAL(sizeof(Trie<>), 8);
 
     BOOST_CHECK_EQUAL(memusage(trie), 0);
     BOOST_CHECK_EQUAL(trie.size(), 0);
 
     trie[0] = 10;
+
+    cerr << "------ inserted 0 -> 10 ------" << endl;
+    trie.dump(cerr);
+    cerr << "-------------------" << endl << endl;
 
     BOOST_CHECK_EQUAL(trie[0], 10);
     BOOST_CHECK_EQUAL(trie.size(), 1);
@@ -1772,6 +1892,10 @@ BOOST_AUTO_TEST_CASE( test_trie )
 
     trie[1] = 20;
 
+    cerr << "------ inserted 1 -> 20 ------" << endl;
+    trie.dump(cerr);
+    cerr << "-------------------" << endl << endl;
+
     BOOST_CHECK_EQUAL(trie[0], 10);
     BOOST_CHECK_EQUAL(trie[1], 20);
     BOOST_CHECK_EQUAL(trie.size(), 2);
@@ -1779,6 +1903,10 @@ BOOST_AUTO_TEST_CASE( test_trie )
     cerr << "memusage(trie) = " << memusage(trie) << endl;
 
     trie[0x1000000000000000ULL] = 30;
+
+    cerr << "------ inserted 1*0 -> 30 ------" << endl;
+    trie.dump(cerr);
+    cerr << "-------------------" << endl << endl;
 
     BOOST_CHECK_EQUAL(trie[0], 10);
     BOOST_CHECK_EQUAL(trie[1], 20);
