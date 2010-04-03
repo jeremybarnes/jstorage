@@ -14,6 +14,7 @@
 #include "jml/arch/vm.h"
 #include "jml/utils/unnamed_bool.h"
 #include "jml/utils/testing/testing_allocator.h"
+#include "jml/utils/hash_map.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <boost/utility/enable_if.hpp>
@@ -1930,6 +1931,41 @@ BOOST_AUTO_TEST_CASE( test_all_memory_freed )
         trie[0] = 10;
         trie[1] = 20;
         trie[0x1000000000000000ULL] = 30;
+
+        BOOST_CHECK(data.bytes_outstanding > 0);
+        BOOST_CHECK(data.objects_outstanding > 0);
+    }
+
+    BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+    BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+}
+
+uint64_t rand64()
+{
+    uint64_t h = random(), l = random();
+    return h << 32 | l;
+}
+
+BOOST_AUTO_TEST_CASE( trie_stress_test_random )
+{
+    Trie<> trie;
+
+    Testing_Allocator_Data data;
+    Testing_Allocator allocator(data);
+
+    {
+        Trie<Testing_Allocator> trie(allocator);
+
+        BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+        BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+
+        for (unsigned i = 0;  i < 100000;  ++i) {
+            uint64_t v = rand64();
+            trie[v] = v;
+        }
+
+        cerr << "trie.size() = " << trie.size() << endl;
+        cerr << "memusage(trie) = " << memusage(trie) << endl;
 
         BOOST_CHECK(data.bytes_outstanding > 0);
         BOOST_CHECK(data.objects_outstanding > 0);
