@@ -216,14 +216,14 @@ struct TrieKey {
         return bits_ < other.bits_;
     }
 
-    std::string print(int width = -1) const
+    std::string print(int done = -1, int width = 8) const
     {
         std::string result;
 
-        for (unsigned i = 0;  i < 8;  ++i) {
-            if (i == width) result += "| ";
+        for (unsigned i = 0;  i < width;  ++i) {
+            if (i == done) result += "| ";
             result += format("%02x", chars_[i]);
-            if (i != 7) result += ' ';
+            if (i != width - 1) result += ' ';
         }
 
         return result;
@@ -680,7 +680,8 @@ struct DenseTrieBase {
 
     std::string print() const
     {
-        string result = format("Dense node: population %zd", presence.count());
+        string result = format("Dense node @ %p: population %zd", this,
+                               presence.count());
         return result;
     }
 
@@ -824,8 +825,8 @@ struct SingleTrieBase {
 
     std::string print() const
     {
-        string result = format("Single node: width %d key ", width_)
-            + key_.print();
+        string result = format("Single node @ %p: width %d key ", this, width_)
+            + key_.print(-1, width_);
         //result += " payload " + ostream_format(payload_);
         return result;
     }
@@ -1033,14 +1034,15 @@ struct MultiTrieBase {
     
     std::string print() const
     {
-        string result = format("Multi node: width %d size %d", width_, size_);
+        string result = format("Multi node @ %p: width %d size %d", this,
+                               width_, size_);
         return result;
     }
 
     void dump(std::ostream & stream) const
     {
-        stream << "Multi node: width=" << width() << " size = " << size()
-               << endl;
+        stream << "Multi node @ " << this << ": width=" << width()
+               << " size = " << size() << endl;
         for (unsigned i = 0;  i < size_;  ++i)
             stream << "  " << entries_[i].key << " --> " << entries_[i].payload
                    << endl;
@@ -1066,8 +1068,10 @@ struct MultiTrieNode : public MultiTrieBase<TriePtr> {
 
     void free_children(TrieOps & ops)
     {
-        for (unsigned i = 0;  i < size_;  ++i)
+        for (unsigned i = 0;  i < size_;  ++i) {
             entries_[i].payload.free(ops);
+            entries_[i].payload = TriePtr();
+        }
     }
 
     size_t memusage(TrieOps & ops) const
@@ -1094,8 +1098,8 @@ struct MultiTrieNode : public MultiTrieBase<TriePtr> {
         string ind(indent, ' ');
         
         if (first_indent) stream << ind;
-        stream << "Multi node: width=" << width() << " size = " << size()
-               << endl;
+        stream << "Multi node @ " << this << ": width=" << width()
+               << " size = " << size() << endl;
         for (unsigned i = 0;  i < size_;  ++i) {
             stream << ind << "  " << entries_[i].key << " --> ";
             entries_[i].payload.dump(ops, stream, indent + 4, 0);
@@ -1517,8 +1521,8 @@ struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
         string ind(indent, ' ');
         
         if (first_indent) stream << ind;
-        stream << "Multi leaf: width=" << width() << " size = " << size()
-               << endl;
+        stream << "Multi leaf @ " << this <<": width=" << width()
+               << " size = " << size() << endl;
         for (unsigned i = 0;  i < size_;  ++i) {
             stream << ind << "  " << entries_[i].key << " --> "
                    << entries_[i].payload << endl;
@@ -1632,7 +1636,7 @@ expand(TrieOps & ops, TrieState & state)
             for (unsigned i = 1;  i <= size_;  ++i) {
 
                 // Same prefix?  Shouldn't happen.
-                if (i != size_ - 1
+                if (i != size_
                     && TrieKey::equal_ranges(entries_[i].key, 0,
                                              entries_[i - 1].key, 0,
                                              split_point))
@@ -1831,9 +1835,11 @@ struct Trie {
             TriePtr expanded = expand_as<Leaf>(ptr, state);
 
             // Free the current pointer
+            cerr << "freeing " << endl;
+            l->dump(cerr, 0, 0);
             destroy(l);
 
-            return insert(expanded, state);
+            return expanded.insert(*this, state);
         }
         
         virtual TriePtr insert(TriePtr ptr, TrieState & state)
@@ -2104,13 +2110,12 @@ uint64_t rand64()
 
 BOOST_AUTO_TEST_CASE( trie_stress_test_random )
 {
-    Trie<> trie;
-
     Testing_Allocator_Data data;
     Testing_Allocator allocator(data);
 
     {
-        Trie<Testing_Allocator> trie(allocator);
+        //Trie<Testing_Allocator> trie(allocator);
+        Trie<> trie;
 
         BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
         BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
