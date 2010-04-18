@@ -2157,4 +2157,70 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
     BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 }
 
+BOOST_AUTO_TEST_CASE( trie_stress_test_uniform )
+{
+    Testing_Allocator_Data data;
+    Testing_Allocator allocator(data);
+
+    {
+        //Trie<Testing_Allocator> trie(allocator);
+        Trie<> trie;
+
+        BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+        BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+
+        for (unsigned i = 0;  i < 100000;  ++i) {
+            //cerr << "i = " << i << endl;
+            uint64_t v = i;
+            trie[v] = v;
+        }
+
+        //trie.dump(cerr, 0, 0);
+
+        cerr << "trie.size() = " << trie.size() << endl;
+        cerr << "memusage(trie) = " << memusage(trie) << endl;
+        cerr << "efficiency = " << 16.0 * trie.size() / memusage(trie) << endl;
+
+        BOOST_CHECK(data.bytes_outstanding > 0);
+        BOOST_CHECK(data.objects_outstanding > 0);
+    }
+
+    BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+    BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+}
+
+BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd )
+{
+    Testing_Allocator_Data data;
+    Testing_Allocator allocator(data);
+
+    {
+        //Trie<Testing_Allocator> trie(allocator);
+        Trie<> trie;
+
+        BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+        BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+
+        for (unsigned i = 0;  i < 100000;  ++i) {
+            //cerr << "i = " << i << endl;
+            uint64_t v = i;
+            char * c1 = reinterpret_cast<char *>(&v);
+            std::reverse(c1, c1 + 8);
+            trie[v] = i;
+        }
+
+        //trie.dump(cerr, 0, 0);
+
+        cerr << "trie.size() = " << trie.size() << endl;
+        cerr << "memusage(trie) = " << memusage(trie) << endl;
+        cerr << "efficiency = " << 16.0 * trie.size() / memusage(trie) << endl;
+
+        BOOST_CHECK(data.bytes_outstanding > 0);
+        BOOST_CHECK(data.objects_outstanding > 0);
+    }
+
+    BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+    BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+}
+
 #endif
