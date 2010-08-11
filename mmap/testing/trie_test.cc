@@ -497,6 +497,7 @@ struct TriePath {
 
     void replace_at_depth(int depth, TriePtr ptr, int width, int iterator = 0)
     {
+#if 0
         cerr << "replace_at_depth: depth = " << depth << " ptr = " << ptr
              << " width = " << width << " iterator = " << iterator
              << endl;
@@ -504,6 +505,7 @@ struct TriePath {
         cerr << "entries[depth].width = " << (int)entries_[depth].width << endl;
         cerr << "entries[depth].iterator = " << (int)entries_[depth].iterator
              << endl;
+#endif
 
         if (depth < 0 || depth >= depth_)
             throw Exception("replace_at_depth: invalid depth");
@@ -715,7 +717,7 @@ struct DenseTrieNode : public DenseTrieBase<TriePtr> {
     }
 
     void dump(TrieOps & ops, std::ostream & stream, int indent,
-              int first_indent)
+              int first_indent) const
     {
         string i(indent, ' ');
         if (first_indent) stream << i;
@@ -764,19 +766,21 @@ struct SingleTrieBase {
     // null pointer.
     int16_t match(const TrieKey & key, int done_width)
     {
+#if 0
         cerr << "match() for " << print() << endl;
         cerr << "done_width " << done_width << " width_ = " << (int)width_
              << endl;
         cerr << "key = " << key.print(done_width) << endl;
+#endif
 
         for (unsigned i = 0;  i < width_;  ++i) {
             if (key[i + done_width] != key_[i]) {
-                cerr << "  DIDN'T MATCH ON " << i << endl;
+                //cerr << "  DIDN'T MATCH ON " << i << endl;
                 return -1;
             }
         }
 
-        cerr << "MATCHED" << endl;
+        //cerr << "MATCHED" << endl;
 
         return 0;
     }
@@ -888,7 +892,7 @@ struct SingleTrieNode : public SingleTrieBase<TriePtr> {
     }
 
     void dump(TrieOps & ops, std::ostream & stream, int indent,
-              int first_indent)
+              int first_indent) const
     {
         string i(indent, ' ');
         if (first_indent) stream << i;
@@ -1093,7 +1097,7 @@ struct MultiTrieNode : public MultiTrieBase<TriePtr> {
     }
 
     void dump(TrieOps & ops, std::ostream & stream, int indent,
-              int first_indent)
+              int first_indent) const
     {
         string ind(indent, ' ');
         
@@ -1474,18 +1478,18 @@ dump(TrieOps & ops, std::ostream & stream, int indent, int first_indent) const
 
 struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 
-    size_t memusage()
+    size_t memusage() const
     {
         size_t result = sizeof(*this);
         return result;
     }
 
-    size_t size()
+    size_t size() const
     {
         return presence.count();
     }
 
-    void dump(std::ostream & stream, int indent, int first_indent)
+    void dump(std::ostream & stream, int indent, int first_indent) const
     {
         string i(indent, ' ');
         if (first_indent) stream << i;
@@ -1506,17 +1510,17 @@ struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
     {
     }
 
-    size_t memusage()
+    size_t memusage() const
     {
         return sizeof(*this);
     }
 
-    size_t size()
+    size_t size() const
     {
         return size_;
     }
 
-    void dump(std::ostream & stream, int indent, int first_indent)
+    void dump(std::ostream & stream, int indent, int first_indent) const
     {
         string ind(indent, ' ');
         
@@ -1530,23 +1534,29 @@ struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
     }
 
     TriePtr expand(TrieOps & ops, TrieState & state);
+
+    TriePtr convert_to_dense(TrieOps & ops, TrieState & state,
+                             int split_point) const;
+
+    TriePtr split_prefixes(TrieOps & ops, TrieState & state,
+                           int split_point) const;
 };
 
 struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
 
-    size_t memusage()
+    size_t memusage() const
     {
         return sizeof(*this);
     }
 
-    size_t size()
+    size_t size() const
     {
         return 1;
     }
 
     TriePtr expand(TrieOps & ops, TrieState & state);
 
-    void dump(std::ostream & stream, int indent, int first_indent)
+    void dump(std::ostream & stream, int indent, int first_indent) const
     {
         string ind(indent, ' ');
         
@@ -1573,8 +1583,95 @@ expand(TrieOps & ops, TrieState & state)
 
 TriePtr
 MultiTrieLeaf::
+convert_to_dense(TrieOps & ops, TrieState & state, int split_point) const
+{
+    // No choice but to make a dense node here
+    //cerr << "Converting to dense node" << endl;
+
+    DenseTrieNode * new_node = ops.create<DenseTrieNode>();
+
+    int prefix_start = 0;
+
+    // Go through to construct the new node
+    for (unsigned i = 1;  i <= size_;  ++i) {
+
+        // Same prefix?  Shouldn't happen.
+        if (i != size_
+            && TrieKey::equal_ranges(entries_[i].key, 0,
+                                     entries_[i - 1].key, 0,
+                                     split_point))
+            continue;
+                    
+        // Num suffixes with this prefix
+        int num_suffixes = (i - prefix_start);
+
+        //cerr << " num_suffixes " << num_suffixes << endl;
+
+        TriePtr new_leaf_ptr;
+        const Entry & entry = entries_[prefix_start];
+
+        if (num_suffixes == 1) {
+            // New single leaf
+            SingleTrieLeaf * new_leaf
+                = ops.create<SingleTrieLeaf>();
+            new_leaf->width_ = width_ - 1;
+
+            new_leaf->key_.init(entry.key, 1, width_ - 1);
+            new_leaf->payload_ = entry.payload;
+
+            new_leaf_ptr.set_leaf(new_leaf);
+        }
+        else if (num_suffixes < NUM_ENTRIES) {
+            // We need a new multi leaf
+            MultiTrieLeaf * new_leaf
+                = ops.create<MultiTrieLeaf>(width_ - 1);
+                        
+            unsigned j2 = 0;
+            for (unsigned j = prefix_start;  j < i;  ++j, ++j2) {
+                // key without the first character
+                            
+                const Entry & entry = entries_[j];
+                            
+                new_leaf->entries_[j2].key
+                    .init(entry.key, 1, width_ - 1);
+                new_leaf->entries_[j2].payload = entry.payload;
+            }
+                       
+            new_leaf->size_ = num_suffixes;
+            new_leaf_ptr.set_leaf(new_leaf);
+        }
+        else {
+            // Something is wrong; 
+            throw Exception("too many suffixes when dense node "
+                            "split out");
+        }
+
+        int16_t it = new_node->insert(entry.key, 0);
+        new_node->set_ptr(it, new_leaf_ptr);
+                    
+        prefix_start = i;
+    }
+
+    TriePtr result;
+    result.set_node(new_node);
+
+#if 0
+    cerr << "  --> before expand mem " << this->memusage() << endl;
+    this->dump(cerr, 0, 0);
+    cerr << "  --> expand result mem " << result.memusage(ops) << endl;
+    result.dump(ops, cerr, 0, 0);
+#endif
+
+    return result;
+}
+
+TriePtr
+MultiTrieLeaf::
 expand(TrieOps & ops, TrieState & state)
 {
+    if (width_ == 0)
+        throw Exception("invalid width");
+
     // Easy case; can't happen very often!
     if (width_ == 1) {
             
@@ -1590,6 +1687,9 @@ expand(TrieOps & ops, TrieState & state)
         return result;
     }
 
+    cerr << "--------------- expand" << endl;
+    dump(cerr, 0, 0);
+
     // We need to decide where to split it in order to make space.
     // This will need to be sped up...
     // TODO: take the inserted entry into account as well
@@ -1600,105 +1700,72 @@ expand(TrieOps & ops, TrieState & state)
         // How many different prefixes at this split point?
         int num_prefixes = 1;
         int prefix_start = 0;
+        int max_num_suffixes = 0;
 
-        size_t child_mem = 0;
+        //size_t child_mem = 0;
 
         for (unsigned i = 1;  i < size_;  ++i) {
+#if 0
+            cerr << "  i = " << i << " prefix "
+                 << entries_[i].key.print(split_point)
+                 << " (" << num_prefixes << ") prefix_start = "
+                 << prefix_start << endl;
+#endif
+
             if (TrieKey::equal_ranges(entries_[i].key, 0,
                                       entries_[i - 1].key, 0,
-                                      split_point))
+                                      split_point)) {
+                //cerr << "    same as last" << endl;
                 continue;
-                
+            }
+            
             // Memory calculation for children
-            int num_suffixes = (num_prefixes - prefix_start);
+            int num_suffixes = (i - prefix_start);
 
-            cerr << "  prefix " << num_prefixes << " num_suffixes "
-                 << num_suffixes << endl;
+            //cerr << "    different; num_suffixes = " << num_suffixes
+            //     << endl;
+
+            if (num_suffixes == 0)
+                throw Exception("invalid num suffixes");
+
+            //cerr << "  prefix " << entries_[i - 1].key.print(split_point)
+            //     << " (" << num_prefixes << "): num_suffixes "
+            //     << num_suffixes << endl;
+
+            max_num_suffixes = std::max(num_suffixes, max_num_suffixes);
 
             // Different prefix
             ++num_prefixes;
             prefix_start = i;
         }
 
-        cerr << "split_point = " << split_point << " num_prefixes = "
-             << num_prefixes << " child_mem = " << child_mem << endl;
+        //cerr << "split_point = " << split_point << " num_prefixes = "
+        //     << num_prefixes << " child_mem = " << child_mem << endl;
 
         if (split_point == 1 && num_prefixes == NUM_ENTRIES) {
-            // No choice but to make a dense node here
-            cerr << "Have to use dense node" << endl;
 
-            DenseTrieNode * new_node = ops.create<DenseTrieNode>();
-
-            prefix_start = 0;
-            num_prefixes = 0;
-
-            // Go through to construct the new node
-            for (unsigned i = 1;  i <= size_;  ++i) {
-
-                // Same prefix?  Shouldn't happen.
-                if (i != size_
-                    && TrieKey::equal_ranges(entries_[i].key, 0,
-                                             entries_[i - 1].key, 0,
-                                             split_point))
-                    continue;
-                    
-                // Num suffixes with this prefix
-                int num_suffixes = (i - prefix_start);
-
-                cerr << " num_suffixes " << num_suffixes << endl;
-
-                if (num_suffixes == 1) {
-                    // New single leaf
-                    SingleTrieLeaf * new_leaf
-                        = ops.create<SingleTrieLeaf>();
-                    new_leaf->width_ = width_ - 1;
-
-                    Entry & entry = entries_[prefix_start];
-
-                    new_leaf->key_.init(entry.key, 1, width_ - 1);
-                    new_leaf->payload_ = entry.payload;
-
-                    int16_t it = new_node->insert(entry.key, 0);
-                    TriePtr ptr;
-                    ptr.set_leaf(new_leaf);
-                    new_node->set_ptr(it, ptr);
-                }
-                else if (num_suffixes < NUM_ENTRIES) {
-                    // We need a new multi leaf
-                    MultiTrieLeaf * new_leaf
-                        = ops.create<MultiTrieLeaf>(width_ - 1);
-                        
-                    unsigned j2 = 0;
-                    for (unsigned j = prefix_start;  j < i;  ++j, ++j2) {
-                        // key without the first character
-                            
-                        Entry & entry = entries_[j];
-                            
-                        new_leaf->entries_[j2].key
-                            .init(entry.key, 1, width_ - 1);
-                        new_leaf->entries_[j2].payload = entry.payload;
-                    }
-                       
-                    new_leaf->size_ = num_suffixes;
-                }
-                else {
-                    // Something is wrong; 
-                    throw Exception("too many suffixes when dense node "
-                                    "split out");
-                }
-                    
-                prefix_start = i;
-            }
-
-            TriePtr result;
-            result.set_node(new_node);
-            cerr << "  --> before expand mem " << this->memusage() << endl;
-            this->dump(cerr, 0, 0);
-            cerr << "  --> expand result mem " << result.memusage(ops) << endl;
-            result.dump(ops, cerr, 0, 0);
-
-            size_ = 0;
+            cerr << "Multi Leaf Expand: split_point = " << split_point
+                 << " num_prefixes = " << num_prefixes
+                 << " max_num_prefixes = " << max_num_suffixes
+                 << " size = " << size() << endl;
             
+            // No choice but to make a dense node here
+            //cerr << "Have to use dense node" << endl;
+
+            TriePtr result = convert_to_dense(ops, state, split_point);
+            size_ = 0;
+            return result;
+        }
+
+        if (max_num_suffixes <= NUM_ENTRIES / 2 || split_point == size_ - 1) {
+
+            cerr << "Multi Leaf Expand: split_point = " << split_point
+                 << " num_prefixes = " << num_prefixes
+                 << " max_num_suffixes = " << max_num_suffixes
+                 << " size = " << size() << endl;
+            
+            TriePtr result = convert_to_dense(ops, state, split_point);
+            size_ = 0;
             return result;
         }
     }
@@ -1707,6 +1774,12 @@ expand(TrieOps & ops, TrieState & state)
     //   node
     // - Otherwise, we have to remove a prefix.  The goal is to figure
     //   out where the prefix gets removed.
+
+    // First version: we test all prefix lengths until we find one that
+    // works.  Later, we might try other splits.
+
+    this->dump(cerr, 0, 0);
+
     throw Exception("Multi Leaf Expand");
 }
 
@@ -1771,8 +1844,8 @@ struct Trie {
         
         virtual TriePtr new_branch(TrieState & state)
         {
-            cerr << "new_branch: state " << endl;
-            state.dump(cerr, *this);
+            //cerr << "new_branch: state " << endl;
+            //state.dump(cerr, *this);
 
             // A single thing to insert, so we do a single leaf
             SingleTrieLeaf * new_leaf
@@ -1835,8 +1908,8 @@ struct Trie {
             TriePtr expanded = expand_as<Leaf>(ptr, state);
 
             // Free the current pointer
-            cerr << "freeing " << endl;
-            l->dump(cerr, 0, 0);
+            //cerr << "freeing " << endl;
+            //l->dump(cerr, 0, 0);
             destroy(l);
 
             return expanded.insert(*this, state);
@@ -1987,16 +2060,16 @@ struct Trie {
         LeafOps ops(this);
         TrieState state(key);
 
-        cerr << "state init" << endl;
-        state.dump(cerr, ops);
+        //cerr << "state init" << endl;
+        //state.dump(cerr, ops);
 
         TriePtr val = itl.root.insert(ops, state);
 
         if (itl.root != val) itl.root = val;
 
-        cerr << "final state: " << endl;
-        state.dump(cerr, ops);
-        cerr << endl;
+        //cerr << "final state: " << endl;
+        //state.dump(cerr, ops);
+        //cerr << endl;
 
         return ops.dereference(state.back().ptr, state.back().iterator);
     }
@@ -2013,7 +2086,7 @@ struct Trie {
         return itl.root.memusage(ops);
     }
 
-    void dump(std::ostream & stream, int indent = 0, int first_indent = -1)
+    void dump(std::ostream & stream, int indent = 0, int first_indent = -1) const
     {
         LeafOps ops(this);
         if (first_indent == -1) first_indent = indent;
@@ -2113,6 +2186,8 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
     Testing_Allocator_Data data;
     Testing_Allocator allocator(data);
 
+    map<uint64_t, uint64_t> test_map;
+
     {
         //Trie<Testing_Allocator> trie(allocator);
         Trie<> trie;
@@ -2123,10 +2198,22 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
         for (unsigned i = 0;  i < 100000;  ++i) {
             uint64_t v = rand64();
             trie[v] = v;
+            test_map[v] = v;
+
+            //if (i >= 1000)
+            //    cerr << "i = " << i << " v = " << v << endl;
+
+            //if (test_map.size() != trie.size()) {
+            //    cerr << "i = " << i << endl;
+            //    cerr << "v = " << v << endl;
+            //    throw Exception("invalid trie size");
+            //}
         }
 
         cerr << "trie.size() = " << trie.size() << endl;
+        cerr << "test_map.size() = " << test_map.size() << endl;
         cerr << "memusage(trie) = " << memusage(trie) << endl;
+        cerr << (1.0 * memusage(trie) / trie.size()) << " bytes/entry" << endl;
 
         BOOST_CHECK(data.bytes_outstanding > 0);
         BOOST_CHECK(data.objects_outstanding > 0);

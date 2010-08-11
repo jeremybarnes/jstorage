@@ -14,8 +14,8 @@ JML_TOP := jml
 
 include $(JML_TOP)/arch/$(ARCH).mk
 
-CXXFLAGS += -I. -Wno-deprecated
-CXXLINKFLAGS += -Ljml/../build/$(ARCH)/bin -Wl,--rpath,jml/../build/$(ARCH)/bin
+CXXFLAGS += -I. -Wno-deprecated -Wno-uninitialized -Winit-self -fno-omit-frame-pointer
+CXXLINKFLAGS += -Ljml/../build/$(ARCH)/bin -Wl,--rpath,jml/../build/$(ARCH)/bin -Wl,--copy-dt-needed-entries
 
 ifeq ($(MAKECMDGOALS),failed)
 include .target.mk
