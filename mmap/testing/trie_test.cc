@@ -1234,6 +1234,128 @@ struct MultiTrieBase {
         return result;
     }
 
+    template<class MultiNode, class DenseNode,
+             class SingleLeaf, class MultiLeaf, class DenseLeaf, class Me>
+    TriePtr
+    do_expand(Me * me, TrieOps & ops, TrieState & state)
+    {
+        if (width_ == 0)
+            throw Exception("invalid width");
+        
+        // Easy case; can't happen very often!
+        if (width_ == 1) {
+            
+            DenseLeaf * new_leaf = ops.create<DenseLeaf>();
+
+            for (unsigned i = 0;  i < size_;  ++i) {
+                new_leaf->dereference(new_leaf->insert(entries_[i].key, 0))
+                    = entries_[i].payload;
+            }
+
+            TriePtr result;
+            result.set_leaf(new_leaf);
+            return result;
+        }
+
+        cerr << "--------------- expand" << endl;
+        me->dump(cerr, 0, 0);
+
+        // We need to decide where to split it in order to make space.
+        // This will need to be sped up...
+        // TODO: take the inserted entry into account as well
+
+        // How much memory usage for different situations?
+
+        for (int split_point = 1;  split_point < width_;  ++split_point) {
+            // How many different prefixes at this split point?
+            int num_prefixes = 1;
+            int prefix_start = 0;
+            int max_num_suffixes = 0;
+
+            //size_t child_mem = 0;
+
+            for (unsigned i = 1;  i < size_;  ++i) {
+#if 0
+                cerr << "  i = " << i << " prefix "
+                     << entries_[i].key.print(split_point)
+                     << " (" << num_prefixes << ") prefix_start = "
+                     << prefix_start << endl;
+#endif
+
+                if (TrieKey::equal_ranges(entries_[i].key, 0,
+                                          entries_[i - 1].key, 0,
+                                          split_point)) {
+                    //cerr << "    same as last" << endl;
+                    continue;
+                }
+            
+                // Memory calculation for children
+                int num_suffixes = (i - prefix_start);
+
+                //cerr << "    different; num_suffixes = " << num_suffixes
+                //     << endl;
+
+                if (num_suffixes == 0)
+                    throw Exception("invalid num suffixes");
+
+                //cerr << "  prefix " << entries_[i - 1].key.print(split_point)
+                //     << " (" << num_prefixes << "): num_suffixes "
+                //     << num_suffixes << endl;
+
+                max_num_suffixes = std::max(num_suffixes, max_num_suffixes);
+
+                // Different prefix
+                ++num_prefixes;
+                prefix_start = i;
+            }
+
+            //cerr << "split_point = " << split_point << " num_prefixes = "
+            //     << num_prefixes << " child_mem = " << child_mem << endl;
+
+            if (split_point == 1 && num_prefixes == NUM_ENTRIES) {
+
+                cerr << "Multi Leaf Expand: split_point = " << split_point
+                     << " num_prefixes = " << num_prefixes
+                     << " max_num_prefixes = " << max_num_suffixes
+                     << " size = " << size() << endl;
+            
+                // No choice but to make a dense node here
+                //cerr << "Have to use dense node" << endl;
+
+                TriePtr result
+                    = expand_to_dense<DenseNode, SingleLeaf, MultiLeaf>
+                    (me, ops);
+                size_ = 0;
+                return result;
+            }
+
+            if (max_num_suffixes <= NUM_ENTRIES / 2 || split_point == size_ - 1) {
+                cerr << "Multi Leaf Expand: split_point = " << split_point
+                     << " num_prefixes = " << num_prefixes
+                     << " max_num_suffixes = " << max_num_suffixes
+                     << " size = " << size() << endl;
+            
+                TriePtr result
+                    = expand_to_multi<MultiNode, SingleLeaf, MultiLeaf>
+                    (me, ops, split_point);
+                size_ = 0;
+                return result;
+            }
+        }
+        // To expand, we can:
+        // - If the width is one, the only thing to do is to make it a dense
+        //   node
+        // - Otherwise, we have to remove a prefix.  The goal is to figure
+        //   out where the prefix gets removed.
+
+        // First version: we test all prefix lengths until we find one that
+        // works.  Later, we might try other splits.
+
+        me->dump(cerr, 0, 0);
+
+        throw Exception("Multi Leaf Expand");
+    }
+
     TriePtr expand(const TrieOps & ops, TrieState & state)
     {
         // To expand, we can:
@@ -1732,10 +1854,6 @@ struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
     }
 
     TriePtr expand(TrieOps & ops, TrieState & state);
-
-    TriePtr convert_to_dense(TrieOps & ops) const;
-
-    TriePtr split_prefix(TrieOps & ops, int split_point) const;
 };
 
 struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
@@ -1781,136 +1899,11 @@ expand(TrieOps & ops, TrieState & state)
 
 TriePtr
 MultiTrieLeaf::
-convert_to_dense(TrieOps & ops) const
-{
-    return expand_to_dense<DenseTrieNode, SingleTrieLeaf, MultiTrieLeaf>
-        (this, ops);
-}
-
-TriePtr
-MultiTrieLeaf::
-split_prefix(TrieOps & ops, int split_point) const
-{
-    return expand_to_multi<MultiTrieNode, SingleTrieLeaf, MultiTrieLeaf>
-        (this, ops, split_point);
-}
-
-TriePtr
-MultiTrieLeaf::
 expand(TrieOps & ops, TrieState & state)
 {
-    if (width_ == 0)
-        throw Exception("invalid width");
-
-    // Easy case; can't happen very often!
-    if (width_ == 1) {
-            
-        DenseTrieLeaf * new_leaf = ops.create<DenseTrieLeaf>();
-
-        for (unsigned i = 0;  i < size_;  ++i) {
-            new_leaf->dereference(new_leaf->insert(entries_[i].key, 0))
-                = entries_[i].payload;
-        }
-
-        TriePtr result;
-        result.set_leaf(new_leaf);
-        return result;
-    }
-
-    cerr << "--------------- expand" << endl;
-    dump(cerr, 0, 0);
-
-    // We need to decide where to split it in order to make space.
-    // This will need to be sped up...
-    // TODO: take the inserted entry into account as well
-
-    // How much memory usage for different situations?
-
-    for (int split_point = 1;  split_point < width_;  ++split_point) {
-        // How many different prefixes at this split point?
-        int num_prefixes = 1;
-        int prefix_start = 0;
-        int max_num_suffixes = 0;
-
-        //size_t child_mem = 0;
-
-        for (unsigned i = 1;  i < size_;  ++i) {
-#if 0
-            cerr << "  i = " << i << " prefix "
-                 << entries_[i].key.print(split_point)
-                 << " (" << num_prefixes << ") prefix_start = "
-                 << prefix_start << endl;
-#endif
-
-            if (TrieKey::equal_ranges(entries_[i].key, 0,
-                                      entries_[i - 1].key, 0,
-                                      split_point)) {
-                //cerr << "    same as last" << endl;
-                continue;
-            }
-            
-            // Memory calculation for children
-            int num_suffixes = (i - prefix_start);
-
-            //cerr << "    different; num_suffixes = " << num_suffixes
-            //     << endl;
-
-            if (num_suffixes == 0)
-                throw Exception("invalid num suffixes");
-
-            //cerr << "  prefix " << entries_[i - 1].key.print(split_point)
-            //     << " (" << num_prefixes << "): num_suffixes "
-            //     << num_suffixes << endl;
-
-            max_num_suffixes = std::max(num_suffixes, max_num_suffixes);
-
-            // Different prefix
-            ++num_prefixes;
-            prefix_start = i;
-        }
-
-        //cerr << "split_point = " << split_point << " num_prefixes = "
-        //     << num_prefixes << " child_mem = " << child_mem << endl;
-
-        if (split_point == 1 && num_prefixes == NUM_ENTRIES) {
-
-            cerr << "Multi Leaf Expand: split_point = " << split_point
-                 << " num_prefixes = " << num_prefixes
-                 << " max_num_prefixes = " << max_num_suffixes
-                 << " size = " << size() << endl;
-            
-            // No choice but to make a dense node here
-            //cerr << "Have to use dense node" << endl;
-
-            TriePtr result = convert_to_dense(ops);
-            size_ = 0;
-            return result;
-        }
-
-        if (max_num_suffixes <= NUM_ENTRIES / 2 || split_point == size_ - 1) {
-
-            cerr << "Multi Leaf Expand: split_point = " << split_point
-                 << " num_prefixes = " << num_prefixes
-                 << " max_num_suffixes = " << max_num_suffixes
-                 << " size = " << size() << endl;
-            
-            TriePtr result = split_prefix(ops, split_point);
-            size_ = 0;
-            return result;
-        }
-    }
-    // To expand, we can:
-    // - If the width is one, the only thing to do is to make it a dense
-    //   node
-    // - Otherwise, we have to remove a prefix.  The goal is to figure
-    //   out where the prefix gets removed.
-
-    // First version: we test all prefix lengths until we find one that
-    // works.  Later, we might try other splits.
-
-    this->dump(cerr, 0, 0);
-
-    throw Exception("Multi Leaf Expand");
+    return do_expand<MultiTrieNode, DenseTrieNode,
+        SingleTrieLeaf, MultiTrieLeaf, DenseTrieLeaf>
+        (this, ops, state);
 }
 
 
