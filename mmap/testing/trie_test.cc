@@ -377,6 +377,8 @@ struct TriePtr {
     template<typename T>
     void set_node(T * node)
     {
+        BOOST_STATIC_ASSERT(T::is_node);
+            
         is_leaf = 0;
         this->type = T::node_type;
         ptr = (uint64_t)node;
@@ -385,6 +387,8 @@ struct TriePtr {
     template<typename T>
     void set_leaf(T * node)
     {
+        BOOST_STATIC_ASSERT(T::is_leaf);
+
         is_leaf = 1;
         this->type = T::node_type;
         ptr = (uint64_t)node;
@@ -696,6 +700,8 @@ struct DenseTrieBase {
 
 struct DenseTrieNode : public DenseTrieBase<TriePtr> {
 
+    enum { is_node = 1 };
+
     void free_children(TrieOps & ops)
     {
         for (unsigned i = 0;  i < 256;  ++i)
@@ -879,6 +885,8 @@ struct SingleTrieBase {
 
 struct SingleTrieNode : public SingleTrieBase<TriePtr> {
 
+    enum { is_node = 1 };
+
     void free_children(TrieOps & ops)
     {
         payload_.free(ops);
@@ -989,8 +997,8 @@ struct MultiTrieBase {
             it[1] = it[0];
 
         // Initialize the new entry
-        cerr << "done_width = " << done_width << " width = " << width()
-             << endl;
+        //cerr << "done_width = " << done_width << " width = " << width()
+        //     << endl;
         entry->key.init(key, done_width, width_);
         
         ++size_;
@@ -1057,6 +1065,175 @@ struct MultiTrieBase {
                    << endl;
     }
 
+    template<class DenseNode, class SingleLeaf, class MultiLeaf,
+             class Me>
+    TriePtr
+    expand_to_dense(const Me * me, TrieOps & ops) const
+    {
+        // No choice but to make a dense node here
+        //cerr << "Converting to dense node" << endl;
+
+        DenseNode * new_node = ops.create<DenseNode>();
+
+        int prefix_start = 0;
+
+        // Go through to construct the new node
+        for (unsigned i = 1;  i <= size_;  ++i) {
+
+            // Same prefix?  Shouldn't happen.
+            if (i != size_
+                && TrieKey::equal_ranges(entries_[i].key, 0,
+                                         entries_[i - 1].key, 0,
+                                         1))
+                continue;
+                    
+            // Num suffixes with this prefix
+            int num_suffixes = (i - prefix_start);
+
+            //cerr << " num_suffixes " << num_suffixes << endl;
+
+            TriePtr new_leaf_ptr;
+            const Entry & entry = entries_[prefix_start];
+
+            if (num_suffixes == 1) {
+                // New single leaf
+                SingleLeaf * new_leaf
+                    = ops.create<SingleLeaf>();
+                new_leaf->width_ = width_ - 1;
+
+                new_leaf->key_.init(entry.key, 1, width_ - 1);
+                new_leaf->payload_ = entry.payload;
+
+                new_leaf_ptr.set_leaf(new_leaf);
+            }
+            else if (num_suffixes < NUM_ENTRIES) {
+                // We need a new multi leaf
+                MultiLeaf * new_leaf
+                    = ops.create<MultiLeaf>(width_ - 1);
+                        
+                unsigned j2 = 0;
+                for (unsigned j = prefix_start;  j < i;  ++j, ++j2) {
+                    // key without the first character
+                            
+                    const Entry & entry = entries_[j];
+                            
+                    new_leaf->entries_[j2].key
+                        .init(entry.key, 1, width_ - 1);
+                    new_leaf->entries_[j2].payload = entry.payload;
+                }
+                       
+                new_leaf->size_ = num_suffixes;
+                new_leaf_ptr.set_leaf(new_leaf);
+            }
+            else {
+                // Something is wrong; 
+                throw Exception("too many suffixes when dense node "
+                                "split out");
+            }
+
+            int16_t it = new_node->insert(entry.key, 0);
+            new_node->set_ptr(it, new_leaf_ptr);
+                    
+            prefix_start = i;
+        }
+
+        TriePtr result;
+        result.set_node(new_node);
+
+#if 0
+        cerr << "  --> before expand mem " << this->memusage() << endl;
+        this->dump(cerr, 0, 0);
+        cerr << "  --> expand result mem " << result.memusage(ops) << endl;
+        result.dump(ops, cerr, 0, 0);
+#endif
+
+        return result;
+    }
+
+    template<class MultiNode, class SingleLeaf, class MultiLeaf, class Me>
+    TriePtr
+    expand_to_multi(const Me * me, TrieOps & ops, int split_point) const
+    {
+        MultiNode * new_node = ops.create<MultiNode>(split_point);
+
+        int prefix_start = 0;
+
+        cerr << "split_prefix: split_point = " << split_point
+             << " width_ = " << width() << endl;
+    
+        // Go through to construct the new node
+        for (unsigned i = 1;  i <= size_;  ++i) {
+
+            // Same prefix?  Shouldn't happen.
+            if (i != size_
+                && TrieKey::equal_ranges(entries_[i].key, 0,
+                                         entries_[i - 1].key, 0,
+                                         split_point))
+                continue;
+                    
+            // Num suffixes with this prefix
+            int num_suffixes = (i - prefix_start);
+
+            //cerr << " num_suffixes " << num_suffixes << endl;
+
+            TriePtr new_leaf_ptr;
+            const Entry & entry = entries_[prefix_start];
+
+            if (num_suffixes == 1) {
+                // New single leaf
+                SingleLeaf * new_leaf
+                    = ops.create<SingleLeaf>();
+                new_leaf->width_ = width_ - split_point;
+
+                new_leaf->key_.init(entry.key, split_point, width_ - split_point);
+                new_leaf->payload_ = entry.payload;
+
+                new_leaf_ptr.set_leaf(new_leaf);
+            }
+            else if (num_suffixes < NUM_ENTRIES) {
+                // We need a new multi leaf
+                MultiLeaf * new_leaf
+                    = ops.create<MultiLeaf>(width_ - split_point);
+                        
+                unsigned j2 = 0;
+                for (unsigned j = prefix_start;  j < i;  ++j, ++j2) {
+                    // key without the first character
+                            
+                    const Entry & entry = entries_[j];
+                            
+                    new_leaf->entries_[j2].key
+                        .init(entry.key, split_point, width_ - split_point);
+                    new_leaf->entries_[j2].payload = entry.payload;
+                }
+                       
+                new_leaf->size_ = num_suffixes;
+                new_leaf_ptr.set_leaf(new_leaf);
+            }
+            else {
+                // Something is wrong; 
+                throw Exception("too many suffixes when dense node "
+                                "split out");
+            }
+
+            int16_t it = new_node->insert(entry.key, 0);
+            new_node->set_ptr(it, new_leaf_ptr);
+                    
+            prefix_start = i;
+        }
+
+        TriePtr result;
+        result.set_node(new_node);
+
+        if (true) {
+            cerr << "  --> before split prefix mem " << me->memusage() << endl;
+            me->dump(cerr, 0, 0);
+            cerr << "  --> after split prefix mem " << result.memusage(ops) << endl;
+            result.dump(ops, cerr, 0, 0);
+        }
+
+        return result;
+    }
+
     TriePtr expand(const TrieOps & ops, TrieState & state)
     {
         // To expand, we can:
@@ -1074,6 +1251,8 @@ struct MultiTrieBase {
 };
 
 struct MultiTrieNode : public MultiTrieBase<TriePtr> {
+
+    enum { is_node = 1 };
 
     MultiTrieNode(int width = 0)
         : MultiTrieBase<TriePtr>(width)
@@ -1378,6 +1557,9 @@ do_insert_as(TrieOps & ops, TrieState & state)
         return result;
     }
     
+    TriePtr expanded = node->expand(ops, state);
+    return expanded;
+
     node->dump(ops, cerr, 0, 0);
 
     throw Exception("node insert failed; need to change to new kind of node");
@@ -1490,6 +1672,8 @@ dump(TrieOps & ops, std::ostream & stream, int indent, int first_indent) const
 
 struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 
+    enum { is_leaf = 1 };
+
     size_t memusage() const
     {
         size_t result = sizeof(*this);
@@ -1516,6 +1700,8 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
 };
 
 struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
+
+    enum { is_leaf = 1 };
 
     MultiTrieLeaf(int width = 0)
         : MultiTrieBase<uint64_t>(width)
@@ -1553,6 +1739,8 @@ struct MultiTrieLeaf : public MultiTrieBase<uint64_t> {
 };
 
 struct SingleTrieLeaf : public SingleTrieBase<uint64_t> {
+
+    enum { is_leaf = 1 };
 
     size_t memusage() const
     {
@@ -1595,166 +1783,16 @@ TriePtr
 MultiTrieLeaf::
 convert_to_dense(TrieOps & ops) const
 {
-    // No choice but to make a dense node here
-    //cerr << "Converting to dense node" << endl;
-
-    DenseTrieNode * new_node = ops.create<DenseTrieNode>();
-
-    int prefix_start = 0;
-
-    // Go through to construct the new node
-    for (unsigned i = 1;  i <= size_;  ++i) {
-
-        // Same prefix?  Shouldn't happen.
-        if (i != size_
-            && TrieKey::equal_ranges(entries_[i].key, 0,
-                                     entries_[i - 1].key, 0,
-                                     1))
-            continue;
-                    
-        // Num suffixes with this prefix
-        int num_suffixes = (i - prefix_start);
-
-        //cerr << " num_suffixes " << num_suffixes << endl;
-
-        TriePtr new_leaf_ptr;
-        const Entry & entry = entries_[prefix_start];
-
-        if (num_suffixes == 1) {
-            // New single leaf
-            SingleTrieLeaf * new_leaf
-                = ops.create<SingleTrieLeaf>();
-            new_leaf->width_ = width_ - 1;
-
-            new_leaf->key_.init(entry.key, 1, width_ - 1);
-            new_leaf->payload_ = entry.payload;
-
-            new_leaf_ptr.set_leaf(new_leaf);
-        }
-        else if (num_suffixes < NUM_ENTRIES) {
-            // We need a new multi leaf
-            MultiTrieLeaf * new_leaf
-                = ops.create<MultiTrieLeaf>(width_ - 1);
-                        
-            unsigned j2 = 0;
-            for (unsigned j = prefix_start;  j < i;  ++j, ++j2) {
-                // key without the first character
-                            
-                const Entry & entry = entries_[j];
-                            
-                new_leaf->entries_[j2].key
-                    .init(entry.key, 1, width_ - 1);
-                new_leaf->entries_[j2].payload = entry.payload;
-            }
-                       
-            new_leaf->size_ = num_suffixes;
-            new_leaf_ptr.set_leaf(new_leaf);
-        }
-        else {
-            // Something is wrong; 
-            throw Exception("too many suffixes when dense node "
-                            "split out");
-        }
-
-        int16_t it = new_node->insert(entry.key, 0);
-        new_node->set_ptr(it, new_leaf_ptr);
-                    
-        prefix_start = i;
-    }
-
-    TriePtr result;
-    result.set_node(new_node);
-
-#if 0
-    cerr << "  --> before expand mem " << this->memusage() << endl;
-    this->dump(cerr, 0, 0);
-    cerr << "  --> expand result mem " << result.memusage(ops) << endl;
-    result.dump(ops, cerr, 0, 0);
-#endif
-
-    return result;
+    return expand_to_dense<DenseTrieNode, SingleTrieLeaf, MultiTrieLeaf>
+        (this, ops);
 }
 
 TriePtr
 MultiTrieLeaf::
 split_prefix(TrieOps & ops, int split_point) const
 {
-    MultiTrieNode * new_node = ops.create<MultiTrieNode>(split_point);
-
-    int prefix_start = 0;
-
-    cerr << "split_prefix: split_point = " << split_point
-         << " width_ = " << width() << endl;
-    
-    // Go through to construct the new node
-    for (unsigned i = 1;  i <= size_;  ++i) {
-
-        // Same prefix?  Shouldn't happen.
-        if (i != size_
-            && TrieKey::equal_ranges(entries_[i].key, 0,
-                                     entries_[i - 1].key, 0,
-                                     split_point))
-            continue;
-                    
-        // Num suffixes with this prefix
-        int num_suffixes = (i - prefix_start);
-
-        //cerr << " num_suffixes " << num_suffixes << endl;
-
-        TriePtr new_leaf_ptr;
-        const Entry & entry = entries_[prefix_start];
-
-        if (num_suffixes == 1) {
-            // New single leaf
-            SingleTrieLeaf * new_leaf
-                = ops.create<SingleTrieLeaf>();
-            new_leaf->width_ = width_ - split_point;
-
-            new_leaf->key_.init(entry.key, split_point, width_ - split_point);
-            new_leaf->payload_ = entry.payload;
-
-            new_leaf_ptr.set_leaf(new_leaf);
-        }
-        else if (num_suffixes < NUM_ENTRIES) {
-            // We need a new multi leaf
-            MultiTrieLeaf * new_leaf
-                = ops.create<MultiTrieLeaf>(width_ - split_point);
-                        
-            unsigned j2 = 0;
-            for (unsigned j = prefix_start;  j < i;  ++j, ++j2) {
-                // key without the first character
-                            
-                const Entry & entry = entries_[j];
-                            
-                new_leaf->entries_[j2].key
-                    .init(entry.key, split_point, width_ - split_point);
-                new_leaf->entries_[j2].payload = entry.payload;
-            }
-                       
-            new_leaf->size_ = num_suffixes;
-            new_leaf_ptr.set_leaf(new_leaf);
-        }
-        else {
-            // Something is wrong; 
-            throw Exception("too many suffixes when dense node "
-                            "split out");
-        }
-
-        int16_t it = new_node->insert(entry.key, 0);
-        new_node->set_ptr(it, new_leaf_ptr);
-                    
-        prefix_start = i;
-    }
-
-    TriePtr result;
-    result.set_node(new_node);
-
-    cerr << "  --> before split prefix mem " << this->memusage() << endl;
-    this->dump(cerr, 0, 0);
-    cerr << "  --> after split prefix mem " << result.memusage(ops) << endl;
-    result.dump(ops, cerr, 0, 0);
-
-    return result;
+    return expand_to_multi<MultiTrieNode, SingleTrieLeaf, MultiTrieLeaf>
+        (this, ops, split_point);
 }
 
 TriePtr
