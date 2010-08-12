@@ -16,6 +16,7 @@
 #include "jml/utils/testing/testing_allocator.h"
 #include "jml/utils/hash_map.h"
 #include "jml/arch/demangle.h"
+#include "jml/utils/exc_assert.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <boost/utility/enable_if.hpp>
@@ -28,6 +29,7 @@
 #include <vector>
 #include <bitset>
 #include <map>
+#include <set>
 
 
 using namespace ML;
@@ -374,6 +376,12 @@ struct TriePtr {
     // Extract the key to the given pointer
     void key(TrieOps & ops, uint16_t iterator, char * write_to) const;
 
+    // Check if the iterator is not null
+    bool not_null(TrieOps & ops, uint16_t iterator) const;
+
+    // Dereference the given iterator
+    TriePtr dereference(TrieOps & ops, uint16_t iterator) const;
+    
     //private:
     template<typename T>
     void set_node(T * node)
@@ -577,6 +585,39 @@ struct TriePath {
         }
     }
 
+    void validate(TrieOps & ops, bool last_invalid, const char * msg = "")
+    {
+        try {
+            int total_width = 0;
+            set<uint64_t> ptrs;
+            
+            // Invariants:
+            // 1.  0 <= width_ <= 0
+            // 2.  Each element has a width > 0
+            // 3.  The given iterator in each ptr points to the next element
+
+            ExcAssert(width_ >= 0);
+            ExcAssert(width_ <= 8);
+            ExcAssert(width_ >= depth_);
+            
+            for (unsigned i = 0;  i < depth_;  ++i) {
+                Entry & entry = entries_[i];
+                total_width += entry.width;
+                ExcAssert(entry.ptr.ptr != 0);
+                ExcAssert(entry.width == entry.ptr.width(ops));
+                ExcAssert(!ptrs.count(entry.ptr.ptr));
+                ptrs.insert(entry.ptr.ptr);
+                
+                //if (!last_invalid || i != depth_ = 1) {
+                //}
+            }
+        } catch (...) {
+            cerr << "TriePath validation failure: " << msg << endl;
+            dump(cerr, ops, 4);
+            throw;
+        }
+    }
+
 private:
     int width_;             // Number of characters matched
     int depth_;             // Number of entries
@@ -595,6 +636,12 @@ struct TrieState : public TriePath {
     }
 
     TrieKey key;
+
+    void validate(TrieOps & ops, bool last_invalid = false,
+                  const char * msg = "")
+    {
+        TriePath::validate(ops, last_invalid, msg);
+    }
 
     void dump(std::ostream & stream) const
     {
@@ -1639,6 +1686,9 @@ do_insert_as(TrieOps & ops, TrieState & state)
 {
     cerr << "do_insert_as " << type_name<Node>() << endl;
 
+    cerr << "this = " << *this << endl;
+    cerr << "state = " << state << endl;
+
     Node * node = as<Node>();
 
     //cerr << "do_insert_as: node = " << node << " depth = " << state.depth
@@ -1651,22 +1701,37 @@ do_insert_as(TrieOps & ops, TrieState & state)
     int16_t found = node->insert(state.key, state.width());
 
     if (node->not_null(found)) {
+        // We just inserted a new element
+
         TriePtr child = TriePtr(node->dereference(found));
-        state.push_back(child, node->width());
+
+        ExcAssert(child);
+
+        state.validate(ops, false, "before insert as 1");
+
+
+        cerr << "state " << endl << state << endl;
+        state.push_back(*this, node->width());
         
         TriePtr new_child = child.insert(ops, state);
         
-        //cerr << "new_child = " << new_child << " child = " << child << endl;
+        cerr << "new_child = " << new_child << " child = " << child << endl;
 
         // Do we need to update our pointer?
         if (new_child != child) {
-            //cerr << "new_child update" << endl;
+            cerr << "new_child update at depth " << depth << endl;
+
             node->set_ptr(found, new_child);
-            state.replace_at_depth(depth, new_child, node->width());
+
+            cerr << "before replace_at_depth: " << endl << state << endl;
+            state.replace_at_depth(depth + 1, new_child, node->width());
+            cerr << "after replace_at_depth: " << endl << state << endl;
         }
 
         //cerr << "finished parent " << parent << " node = " << node
         //     << " this = " << *this << endl;
+
+        state.validate(ops, false, "insert as 1");
 
         TriePtr result;
         result.set_node(node);
@@ -1678,8 +1743,13 @@ do_insert_as(TrieOps & ops, TrieState & state)
     if (node != state.at_depth(depth - 1).ptr.as<Node>())
         throw Exception("nodes were different at depth");
 
-    state.replace_at_depth(depth - 1, expanded, expanded.width(ops));
-    return expanded.insert(ops, state);
+    state.replace_at_depth(depth, expanded, expanded.width(ops));
+
+    TriePtr result = expanded.insert(ops, state);
+    
+    state.validate(ops, false, "insert as 2");
+
+    return result;
 
     node->dump(ops, cerr, 0, 0);
 
@@ -1748,6 +1818,26 @@ width(TrieOps & ops) const
     if (is_leaf) return ops.width(*this);
     TRIE_SWITCH_ON_NODE(return width_as, ());
 }
+
+#if 0
+bool
+TriePtr::
+not_null(TrieOps & ops, uint16_t iterator) const
+{
+    if (!ptr) return 0;
+    if (is_leaf) return ops.not_null(*this, iterator);
+    TRIE_SWITCH_ON_NODE(return as, ()->not_null(iterator));
+}
+
+TriePtr
+TriePtr::
+dereference(TrieOps & ops, uint16_t iterator) const
+{
+    if (!ptr) return 0;
+    if (is_leaf) return ops.dereference(*this, iterator);
+    TRIE_SWITCH_ON_NODE(return as, ()->dereference(iterator));
+}
+#endif
 
 std::string
 TriePtr::
@@ -2228,6 +2318,8 @@ struct Trie {
         TriePtr val = itl.root.insert(ops, state);
 
         if (itl.root != val) itl.root = val;
+
+        state.validate(ops, false, "operator []");
 
         //cerr << "final state: " << endl;
         //state.dump(cerr, ops);
