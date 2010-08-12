@@ -17,6 +17,10 @@ They're far from finished, but include:
 * A Sandbox class that allows isolation of sets of changes from each other.
 * Various other bits and pieces.
 
+Note that it's in a very pre-alpha phase: only bits and pieces work; there's
+been no performance tuning, etc.
+
+
 LICENSE:
 
 Copyright 2009-2010 Jeremy Barnes and Recoset Inc.
@@ -34,7 +38,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 
-------------
+---------------------------
 
 libmvcc: a low-level library providing the basics for multi version concurrency control.
 
