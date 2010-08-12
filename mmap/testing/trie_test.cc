@@ -1356,16 +1356,6 @@ struct MultiTrieBase {
         throw Exception("Multi Leaf Expand");
     }
 
-    TriePtr expand(const TrieOps & ops, TrieState & state)
-    {
-        // To expand, we can:
-        // - If the width is one, the only thing to do is to make it a dense
-        //   node
-        // - Otherwise, we have to remove a prefix.  The goal is to figure
-        //   out where the prefix gets removed.
-        throw Exception("Multi Node Expand");
-    }
-
     size_t size() const
     {
         return size_;
