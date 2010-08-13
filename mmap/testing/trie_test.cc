@@ -2818,10 +2818,6 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd )
     BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 }
 
-#endif
-
-#if 1
-
 BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd2 )
 {
     Testing_Allocator_Data data;
@@ -2836,6 +2832,63 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd2 )
 
         for (unsigned i = 0;  i < 100000;  ++i) {
             uint64_t v = i * 256;
+            if (i % 1000 == 999) cerr << "i = " << i << " v = " << v << endl;
+            char * c1 = reinterpret_cast<char *>(&v);
+            std::reverse(c1, c1 + 8);
+            try {
+                trie[v] = i;
+                
+                if (trie[v] != i)
+                    throw Exception("problem in insert");
+
+                if (i % 1000 == 999 && trie.size() != i + 1) {
+                    cerr << "i = " << i << " trie.size() = "
+                         << trie.size() << endl;
+                    trie.dump(cerr, 0, 0);
+                    throw Exception("trie did not get bigger");
+                }
+            }
+            catch (...) {
+                cerr << "i = " << i << endl;
+                trie.dump(cerr, 0, 0);
+                throw;
+            }
+        }
+        
+        //trie.dump(cerr, 0, 0);
+
+        cerr << "uniform bwd 2" << endl;
+        cerr << "trie.size() = " << trie.size() << endl;
+        cerr << "memusage(trie) = " << memusage(trie) << endl;
+        cerr << "efficiency = " << 16.0 * trie.size() / memusage(trie) << endl;
+        cerr << (1.0 * memusage(trie) / trie.size()) << " bytes/entry" << endl;
+
+        BOOST_CHECK(data.bytes_outstanding > 0);
+        BOOST_CHECK(data.objects_outstanding > 0);
+    }
+
+    BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+    BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+}
+
+#endif
+
+#if 1
+
+BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd3 )
+{
+    Testing_Allocator_Data data;
+    Testing_Allocator allocator(data);
+
+    {
+        //Trie<Testing_Allocator> trie(allocator);
+        Trie<> trie;
+
+        BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+        BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+
+        for (uint64_t i = 0;  i < 100000;  ++i) {
+            uint64_t v = i * 65536;
             if (i % 1000 == 999) cerr << "i = " << i << " v = " << v << endl;
             char * c1 = reinterpret_cast<char *>(&v);
             std::reverse(c1, c1 + 8);
