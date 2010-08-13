@@ -1,3 +1,45 @@
+jstorage
+--------
+
+Jeremy Barnes
+
+This is a collection of low-level pieces concerned with persistent storage of
+structured data.
+
+They're far from finished, but include:
+* An explicit MVCC framework (see below).  By explicitly wrapping objects in
+  MVCC, they allow atomic transactions on multiple objects.
+* A generic snapshotting mechanism that uses the VM subsystem to track dirty
+  pages and create deltas (which can be transported over a network) to enable
+  multiple machines to keep up to date, in a completely atomic manner.
+* An implementation of Persistent Versioned Objects, which can have multiple
+  versions in memory and on disk.
+* A Sandbox class that allows isolation of sets of changes from each other.
+* Various other bits and pieces.
+
+Note that it's in a very pre-alpha phase: only bits and pieces work; there's
+been no performance tuning, etc.
+
+
+LICENSE:
+
+Copyright 2009-2010 Jeremy Barnes and Recoset Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+
+---------------------------
+
 libmvcc: a low-level library providing the basics for multi version concurrency control.
 
 MVCC, or Multi Version Concurrency Control, is a technique for implementing higly concurrent systems via transaction-like semantics.  It can be used for multi-threaded programming, but also in order to maintain snapshots of data.
