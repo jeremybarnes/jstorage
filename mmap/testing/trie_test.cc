@@ -12,6 +12,7 @@
 #include "jml/arch/exception.h"
 #include "jml/arch/exception_handler.h"
 #include "jml/arch/vm.h"
+#include "jml/arch/backtrace.h"
 #include "jml/utils/unnamed_bool.h"
 #include "jml/utils/testing/testing_allocator.h"
 #include "jml/utils/hash_map.h"
@@ -381,7 +382,8 @@ struct TriePtr {
         struct {
             uint64_t is_leaf:1;
             uint64_t type:2;
-            uint64_t ptr:61;
+            uint64_t sz:3;
+            uint64_t ptr:58;
         };
         uint64_t bits;
     };
@@ -1217,9 +1219,13 @@ struct MultiTrieBase {
     {
         int prefix_start = 0;
 
-        //cerr << "expand_to: " << type_name<NewNode>()
-        //     << ": split_point " << split_point << endl;
-        //me->dump(ops, cerr, 0, 0);
+#if 0
+        cerr << "expand_to: " << type_name<NewNode>()
+             << ": split_point " << split_point << endl;
+        me->dump(ops, cerr, 0, 0);
+
+        backtrace();
+#endif
 
         int num_prefixes = 0;
 
@@ -1555,7 +1561,7 @@ struct MultiTrieBase {
 
             TriePtr result;
 
-            if (num_prefixes == NUM_ENTRIES && false) {
+            if (num_prefixes == NUM_ENTRIES && split_point == 1) {
                 result = expand_to_dense<DenseNode, SingleLeaf, MultiLeaf,
                                          SingleNode, DenseLeaf, DenseNode>
                     (me, ops, split_point);
@@ -2709,6 +2715,8 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
             //}
         }
 
+        //trie.dump(cerr, 0, 0);
+
         cerr << "trie.size() = " << trie.size() << endl;
         cerr << "test_map.size() = " << test_map.size() << endl;
         cerr << "memusage(trie) = " << memusage(trie) << endl;
@@ -2736,6 +2744,12 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform )
         BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 
         for (unsigned i = 0;  i < 100000;  ++i) {
+            //if (i == 5 || i == 15 || i == 16 || i == 20) {
+            //    cerr << endl << endl << "---------- dumping at " << i << endl;
+            //    trie.dump(cerr, 0, 0);
+            //}
+
+            //if (i == 20) break;
             //cerr << "i = " << i << endl;
             uint64_t v = i;
             trie[v] = v;
@@ -2788,7 +2802,7 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd )
                 throw;
             }
         }
-
+        
         //trie.dump(cerr, 0, 0);
 
         cerr << "trie.size() = " << trie.size() << endl;
@@ -2831,8 +2845,12 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd2 )
                 if (trie[v] != i)
                     throw Exception("problem in insert");
 
-                if (i % 1000 == 999 && trie.size() != i + 1)
+                if (i % 1000 == 999 && trie.size() != i + 1) {
+                    cerr << "i = " << i << " trie.size() = "
+                         << trie.size() << endl;
+                    trie.dump(cerr, 0, 0);
                     throw Exception("trie did not get bigger");
+                }
             }
             catch (...) {
                 cerr << "i = " << i << endl;
