@@ -822,12 +822,12 @@ struct DenseTrieNode : public DenseTrieBase<TriePtr> {
     void dump(TrieOps & ops, std::ostream & stream, int indent,
               int first_indent) const
     {
-        string i(indent, ' ');
-        if (first_indent) stream << i;
+        string ii(indent, ' ');
+        if (first_indent) stream << ii;
         stream << print() << endl;
         for (unsigned i = 0;  i < 256;  ++i) {
             if (presence[i]) {
-                stream << "  " << format("%02x", i) << " --> ";
+                stream << ii << "  " << format("%02x", i) << " --> ";
                 children[i].dump(ops, stream, indent + 4, 0);
             }
         }
@@ -873,7 +873,7 @@ struct SingleTrieBase {
         cerr << "match() for " << print() << endl;
         cerr << "done_width " << done_width << " width_ = " << (int)width_
              << endl;
-        cerr << "key = " << key.print(done_width) << endl;
+        cerr << "key = " << key.print(-1, done_width) << endl;
 #endif
 
         for (unsigned i = 0;  i < width_;  ++i) {
@@ -1046,6 +1046,8 @@ struct MultiTrieBase {
     // null; in this case the node was full and will need to be expanded.
     int16_t insert(const TrieKey & key, int done_width)
     {
+        //bool debug = state.key == 0x62fb965c1a345131;
+
         //cerr << "Multi insert of " << key << " at done width " << done_width
         //     << endl;
         //cerr << "  -> before" << endl;
@@ -1074,6 +1076,7 @@ struct MultiTrieBase {
         //cerr << "done_width = " << done_width << " width = " << width()
         //     << endl;
         entry->key.init(key, done_width, width_);
+        entry->payload = Payload();
         
         ++size_;
 
@@ -1136,12 +1139,15 @@ struct MultiTrieBase {
         return result;
     }
 
-    void dump(std::ostream & stream) const
+    void dump(std::ostream & stream, int indent, int first_indent) const
     {
-        stream << "Multi node @ " << this << ": width=" << width()
+        stream << string(first_indent, ' ')
+               << "Multi node @ " << this << ": width=" << width()
                << " size = " << size() << endl;
+        string s(indent, ' ');
         for (unsigned i = 0;  i < size_;  ++i)
-            stream << "  " << entries_[i].key << " --> " << entries_[i].payload
+            stream << s << "  " << entries_[i].key.print(-1, width())
+                   << " --> " << entries_[i].payload
                    << endl;
     }
 
@@ -1492,7 +1498,8 @@ struct MultiTrieNode : public MultiTrieBase<TriePtr> {
         stream << "Multi node @ " << this << ": width=" << width()
                << " size = " << size() << endl;
         for (unsigned i = 0;  i < size_;  ++i) {
-            stream << ind << "  " << entries_[i].key << " --> ";
+            stream << ind << "  " << entries_[i].key.print(-1, width())
+                   << " --> ";
             entries_[i].payload.dump(ops, stream, indent + 4, 0);
         }
     }
@@ -1730,23 +1737,38 @@ TriePtr
 TriePtr::
 do_insert_recursive_as(TrieOps & ops, TrieState & state)
 {
-    //cerr << "do_insert_recursive_as for " << type_name<Node>()
-    //     << " depth " << state.depth()
-    //     << " this " << *this << endl;
+    bool debug = false;//state.key == 0x62fb965c1a345131 && state.depth() > 0;
+
+    if (debug) {
+        cerr << "do_insert_recursive_as for " << type_name<Node>()
+             << " depth " << state.depth()
+             << " this " << *this << endl;
+    }
 
     Node * node = as<Node>();
     if (!node) node = ops.create<Node>();
+
+    if (debug) {
+        cerr << "node: " << endl;
+        node->dump(ops, cerr, 0, 0);
+    }
 
     //int depth = state.depth();
 
     int16_t found = node->insert(state.key, state.width());
 
-    //cerr << "found = " << found << endl;
+    if (debug)
+        cerr << "found = " << found << endl;
 
     if (node->not_null(found)) {
         // This node doesn't need to be expanded, and there is a key with
         // width node->width() at the given iterator that matches that
         // part of the key being inserted.
+
+        if (debug) {
+            cerr << "node after insert: " << endl;
+            node->dump(ops, cerr, 0, 0);
+        }
 
         TriePtr child = TriePtr(node->dereference(found));
 
@@ -1888,7 +1910,7 @@ dump(TrieOps & ops, std::ostream & stream, int indent, int first_indent) const
 
     stream << i << print() << " ";
     if (!ptr) { stream << endl;  return; }
-    if (is_leaf) { ops.dump(*this, stream, indent, first_indent);  return; }
+    if (is_leaf) { ops.dump(*this, stream, indent, 0);  return; }
 
 
     TRIE_SWITCH_ON_NODE(as, ()->dump(ops, stream, indent, 0));
@@ -2148,6 +2170,8 @@ struct Trie {
         template<typename Leaf>
         TriePtr insert_recursive_as(TriePtr ptr, TrieState & state)
         {
+            bool debug = false;//state.key == 0x62fb965c1a345131;
+
             Leaf * l = ptr.as<Leaf>();
             if (!l) l = create<Leaf>();
             
@@ -2160,24 +2184,39 @@ struct Trie {
             }
 
             //int depth = state.depth();
-            //cerr << "===== leaf expand depth " << state.depth() << endl;
 
-            //ptr.dump(*this, cerr, 4, 0);
+            if (debug) {
+                cerr << "===== leaf expand depth " << state.depth() << endl;
 
-            //cerr << "ptr depth " << depth << " = " << ptr << endl;
+                cerr << state << endl;
+                
+                cerr << "ptr:" << endl;
+                ptr.dump(*this, cerr, 4, 0);
+            }
+
             TriePtr expanded = expand_as<Leaf>(ptr, state);
-            //cerr << "expanded depth = " << depth << " = " << expanded << endl;
 
-            //expanded.dump(*this, cerr, 4, 0);
+            if (debug) {
+                cerr << "expanded:" << endl;
+                expanded.dump(*this, cerr, 4, 0);
 
-            cerr << "destroying " << l << " depth " << state.depth()
-                 << " key " << state.key << " l->key " << l->print() << endl;
+                cerr << "destroying " << l << " depth " << state.depth()
+                     << " key " << state.key << " l->key " << l->print()
+                     << " ptr " << ptr << " expanded " << expanded << endl;
+                
+                state.dump(cerr, *this);
+            }
 
             destroy(l);
             TriePtr result = expanded.insert_recursive(*this, state);
-            //cerr << "result depth " << depth << " = " << result << endl;
 
-            //result.dump(*this, cerr, 4, 0);
+            if (debug) {
+                cerr << "result: " << endl;
+                result.dump(*this, cerr, 4, 0);
+
+                cerr << "state at end: " << endl;
+                state.dump(cerr, *this);
+            }
 
             return result;
         }
@@ -2330,15 +2369,22 @@ struct Trie {
         //cerr << "state init" << endl;
         //state.dump(cerr, ops);
 
+        bool debug = false;//state.key == 0x62fb965c1a345131;
+
         TriePtr val = itl.root.insert_recursive(ops, state);
 
         if (itl.root != val) itl.root = val;
 
         state.validate(ops, false, "operator []");
 
-        //cerr << "final state: " << endl;
-        //state.dump(cerr, ops);
-        //cerr << endl;
+        if (debug) {
+            cerr << "final state: " << endl;
+            state.dump(cerr, ops);
+            cerr << endl;
+
+            cerr << "entry 1: " << endl;
+            state.at_depth(1).ptr.dump(ops, cerr, 0, 0);
+        }
 
         return ops.dereference(state.back().ptr, state.back().iterator);
     }
@@ -2474,7 +2520,7 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
                 //cerr << endl;
                 //cerr << "*************************************************"
                 //     << endl;
-                cerr << "i = " << i << " v = " << format("%016lx", v) << endl;
+                //cerr << "i = " << i << " v = " << format("%016lx", v) << endl;
 
                 trie[v] = v;
                 test_map[v] = v;
@@ -2483,6 +2529,10 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
                     throw Exception("consistency problem at %d: %016lx != %016lx",
                                     i, v, trie[v]);
                 //BOOST_REQUIRE_EQUAL(trie[v], v);
+
+                //if (i == 2747) {
+                //    trie.dump(cerr);
+                //}
 
                 if (i % 10000 != 9999) continue;
                 for (map<uint64_t, uint64_t>::const_iterator
