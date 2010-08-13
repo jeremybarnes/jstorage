@@ -40,6 +40,28 @@ struct TrieLeaf;
 struct TrieState;
 struct TriePtr;
 
+/* Goal of insert:
+   - Return an iterator to a place in the structure allocated for the given
+     part of the key.
+   - Does NOT have to set that place to anything
+   - Does NOT do anything recursive
+*/
+
+/* Goal of insert_and_recurse:
+   - Calls insert() to get the place for the given part of the key
+   - If insert fails, then calls expand() 
+*/
+
+/* Things handled abstractly by the node:
+ */
+
+/* Things handled by the node family:
+   - Expansion and contraction
+*/
+
+template<int I> struct enabler {};
+    
+
 /** Base class for an allocator.  */
 struct TrieAllocator {
     virtual ~TrieAllocator() {}
@@ -314,7 +336,7 @@ struct TrieOps : public TrieAllocator {
     virtual uint64_t size(TriePtr ptr) const = 0;
 
     // Insert the new leaf into the given branch
-    virtual TriePtr insert(TriePtr ptr, TrieState & state) = 0;
+    virtual TriePtr insert_recursive(TriePtr ptr, TrieState & state) = 0;
 
     // Expand the branch at ptr so that a new element can be inserted into it
     virtual TriePtr expand(TriePtr ptr, TrieState & state) = 0;
@@ -340,6 +362,18 @@ struct TriePtr {
     {
     }
 
+    template<typename T>
+    TriePtr(T * node, enabler<T::is_node> * = 0)
+    {
+        set_node(node);
+    }
+
+    template<typename T>
+    TriePtr(T * leaf, enabler<T::is_leaf> * = 0)
+    {
+        set_leaf(leaf);
+    }
+
     union {
         struct {
             uint64_t is_leaf:1;
@@ -359,7 +393,7 @@ struct TriePtr {
     // value is the new value that this TriePtr should take; it's used
     // (for example) when the current node gets too full and needs to be
     // reallocated.
-    TriePtr insert(TrieOps & ops, TrieState & state);
+    TriePtr insert_recursive(TrieOps & ops, TrieState & state);
 
     // How many characters does this pointer match?
     int width(TrieOps & ops) const;
@@ -411,8 +445,6 @@ struct TriePtr {
         ptr = (uint64_t)node;
     }
 
-    template<int I> struct enabler {};
-    
     template<typename T>
     void set(T * node, enabler<T::is_node> * = 0)
     {
@@ -451,7 +483,7 @@ struct TriePtr {
 
     template<typename Node>
     TriePtr
-    do_insert_as(TrieOps & ops, TrieState & state);
+    do_insert_recursive_as(TrieOps & ops, TrieState & state);
 
     template<typename Node>
     size_t
@@ -1014,10 +1046,10 @@ struct MultiTrieBase {
     // null; in this case the node was full and will need to be expanded.
     int16_t insert(const TrieKey & key, int done_width)
     {
-        cerr << "Multi insert of " << key << " at done width " << done_width
-             << endl;
-        cerr << "  -> before" << endl;
-        dump(cerr);
+        //cerr << "Multi insert of " << key << " at done width " << done_width
+        //     << endl;
+        //cerr << "  -> before" << endl;
+        //dump(cerr);
 
         Entry * entry
             = std::lower_bound(entries_, entries_ + size_,
@@ -1027,12 +1059,12 @@ struct MultiTrieBase {
             && TrieKey::equal_ranges(key, done_width, entry->key, 0, width_))
             return entry - entries_;
 
-        cerr << "  -> not found" << endl;
+        //cerr << "  -> not found" << endl;
 
         if (size_ == NUM_ENTRIES) // full
             return -1;  // need to expand to another kind of node...
 
-        cerr << "  -> not full" << endl;
+        //cerr << "  -> not full" << endl;
 
         // Move everything after forward
         for (Entry * it = entries_ + size_ - 1;  it >= entry;  --it)
@@ -1045,8 +1077,8 @@ struct MultiTrieBase {
         
         ++size_;
 
-        cerr << "  -> after" << endl;
-        dump(cerr);
+        //cerr << "  -> after" << endl;
+        //dump(cerr);
 
         return entry - entries_;
     }
@@ -1078,6 +1110,9 @@ struct MultiTrieBase {
 
     value_type & dereference(int16_t it)
     {
+        //cerr << "dereferencing " << it << " at " << this << endl;
+        //dump(cerr);
+        
         if (it < -1 || it >= size_)
             throw Exception("not_null(): invalid iterator");
         if (it == -1)
@@ -1185,7 +1220,7 @@ struct MultiTrieBase {
         TriePtr result;
         result.set_node(new_node);
 
-        if (true) {
+        if (false) {
             cerr << "  --> before expand dense mem "
                  << me->memusage(ops) << endl;
             me->dump(ops, cerr, 0, 0);
@@ -1205,8 +1240,8 @@ struct MultiTrieBase {
 
         int prefix_start = 0;
 
-        cerr << "split_prefix: split_point = " << split_point
-             << " width_ = " << width() << endl;
+        //cerr << "split_prefix: split_point = " << split_point
+        //     << " width_ = " << width() << endl;
     
         // Go through to construct the new node
         for (unsigned i = 1;  i <= size_;  ++i) {
@@ -1271,7 +1306,7 @@ struct MultiTrieBase {
         TriePtr result;
         result.set_node(new_node);
 
-        if (true) {
+        if (false) {
             cerr << "  --> before split prefix mem " << me->memusage(ops) << endl;
             me->dump(ops, cerr, 0, 0);
             cerr << "  --> after split prefix mem " << result.memusage(ops) << endl;
@@ -1304,8 +1339,8 @@ struct MultiTrieBase {
             return result;
         }
 
-        cerr << "--------------- expand" << endl;
-        me->dump(ops, cerr, 0, 0);
+        //cerr << "--------------- expand" << endl;
+        //me->dump(ops, cerr, 0, 0);
 
         // We need to decide where to split it in order to make space.
         // This will need to be sped up...
@@ -1361,11 +1396,13 @@ struct MultiTrieBase {
 
             if (split_point == 1 && num_prefixes == NUM_ENTRIES) {
 
+                #if 0
                 cerr << "Multi Expand to Dense: split_point = " << split_point
                      << " num_prefixes = " << num_prefixes
                      << " max_num_prefixes = " << max_num_suffixes
                      << " size = " << size() << endl;
-            
+                #endif
+
                 // No choice but to make a dense node here
                 //cerr << "Have to use dense node" << endl;
 
@@ -1377,11 +1414,13 @@ struct MultiTrieBase {
             }
 
             if (max_num_suffixes <= NUM_ENTRIES / 2 || split_point == size_ - 1) {
+                #if 0
                 cerr << "Multi Split: split_point = " << split_point
                      << " num_prefixes = " << num_prefixes
                      << " max_num_suffixes = " << max_num_suffixes
                      << " size = " << size() << endl;
-            
+                #endif
+
                 TriePtr result
                     = expand_to_multi<MultiNode, SingleLeaf, MultiLeaf>
                     (me, ops, split_point);
@@ -1679,86 +1718,65 @@ match(TrieOps & ops, TrieState & state) const
 #endif
 }
 
+// This function:
+// 1.  
+
+// Postconditions:
+// 1.  The key at depth state.depth() (on entry) is the same one returned
+//     by this function.
+
 template<typename Node>
 TriePtr
 TriePtr::
-do_insert_as(TrieOps & ops, TrieState & state)
+do_insert_recursive_as(TrieOps & ops, TrieState & state)
 {
-    cerr << "do_insert_as " << type_name<Node>() << endl;
-
-    cerr << "this = " << *this << endl;
-    cerr << "state = " << state << endl;
+    //cerr << "do_insert_recursive_as for " << type_name<Node>()
+    //     << " depth " << state.depth()
+    //     << " this " << *this << endl;
 
     Node * node = as<Node>();
+    if (!node) node = ops.create<Node>();
 
-    //cerr << "do_insert_as: node = " << node << " depth = " << state.depth
-    //     << endl;
-
-    int depth = state.depth();
-
-    if (!ptr) node = ops.create<Node>();
+    //int depth = state.depth();
 
     int16_t found = node->insert(state.key, state.width());
 
+    //cerr << "found = " << found << endl;
+
     if (node->not_null(found)) {
-        // We just inserted a new element
+        // This node doesn't need to be expanded, and there is a key with
+        // width node->width() at the given iterator that matches that
+        // part of the key being inserted.
 
         TriePtr child = TriePtr(node->dereference(found));
 
-        ExcAssert(child);
-
-        state.validate(ops, false, "before insert as 1");
-
-
-        cerr << "state " << endl << state << endl;
-        state.push_back(*this, node->width());
+        // Put us there 
+        state.push_back(*this, node->width(), found);
         
-        TriePtr new_child = child.insert(ops, state);
+        // Recurse
+        TriePtr new_child = child.insert_recursive(ops, state);
         
-        cerr << "new_child = " << new_child << " child = " << child << endl;
-
-        // Do we need to update our pointer?
-        if (new_child != child) {
-            cerr << "new_child update at depth " << depth << endl;
-
+        // Do we need to update our pointer?  This would happen if the child
+        // wasn't initialized or the child had to expand
+        if (new_child != child)
             node->set_ptr(found, new_child);
 
-            cerr << "before replace_at_depth: " << endl << state << endl;
-            state.replace_at_depth(depth + 1, new_child, node->width());
-            cerr << "after replace_at_depth: " << endl << state << endl;
-        }
-
-        //cerr << "finished parent " << parent << " node = " << node
-        //     << " this = " << *this << endl;
-
-        state.validate(ops, false, "insert as 1");
-
-        TriePtr result;
-        result.set_node(node);
-        return result;
+        return node;
     }
     
+    //cerr << "=========== need expand depth " << depth << endl;
+    //cerr << "orig " << *this << endl;
+
     TriePtr expanded = node->expand(ops, state);
-    // Fix up the trie path entry
-    if (node != state.at_depth(depth - 1).ptr.as<Node>())
-        throw Exception("nodes were different at depth");
-
-    state.replace_at_depth(depth, expanded, expanded.width(ops));
-
-    TriePtr result = expanded.insert(ops, state);
-    
-    state.validate(ops, false, "insert as 2");
-
+    //cerr << "expanded = " << expanded << endl;
+    TriePtr result = expanded.insert_recursive(ops, state);
+    //cerr << "result = " << result << endl;
     return result;
-
-    node->dump(ops, cerr, 0, 0);
-
-    throw Exception("node insert failed; need to change to new kind of node");
 }
 
 TriePtr
 TriePtr::
-insert(TrieOps & ops, TrieState & state)
+insert_recursive(TrieOps & ops, TrieState & state)
 {
     // If there's nothing there then we ask for a new branch.  If there's a
     // node there then we ask for it to be inserted, otherwise we ask for
@@ -1769,8 +1787,8 @@ insert(TrieOps & ops, TrieState & state)
     //cerr << "state = " << state << endl;
 
     if (!*this) return ops.new_branch(state);
-    else if (is_leaf) return ops.insert(*this, state);
-    else TRIE_SWITCH_ON_NODE(return do_insert_as, (ops, state));
+    else if (is_leaf) return ops.insert_recursive(*this, state);
+    else TRIE_SWITCH_ON_NODE(return do_insert_recursive_as, (ops, state));
 }
 
 size_t
@@ -1843,7 +1861,8 @@ std::string
 TriePtr::
 print() const
 {
-    string result = format("%012x %c %d", ptr, (is_leaf ? 'l' : 'n'), type);
+    string result = format("%012x %s %d", ptr, (is_leaf ? "leaf" : "node"),
+                           type);
     //if (!is_leaf)
     //    TRIE_SWITCH_ON_NODE(return result + " " + as, ()->print());
     return result;
@@ -1991,7 +2010,7 @@ expand(TrieOps & ops, TrieState & state)
     TriePtr result;
     result.set_leaf(new_leaf);
 
-    if (true) {
+    if (false) {
         cerr << "  --> single expand mem " << this->memusage(ops) << endl;
         this->dump(ops, cerr, 0, 0);
         cerr << "  --> after single expand mem "
@@ -2088,9 +2107,9 @@ struct Trie {
             SingleTrieLeaf * new_leaf
                 = create<SingleTrieLeaf>();
             
-            new_leaf->width_ = 8 - state.depth();
+            new_leaf->width_ = 8 - state.width();
             for (unsigned i = 0;  i < new_leaf->width_;  ++i)
-                new_leaf->key_.chars_[i] = state.key[i];
+                new_leaf->key_.chars_[i] = state.key[i + state.width()];
             new_leaf->payload_ = 0;
             
             TriePtr result;
@@ -2127,9 +2146,8 @@ struct Trie {
         }
         
         template<typename Leaf>
-        TriePtr insert_as(TriePtr ptr, TrieState & state)
+        TriePtr insert_recursive_as(TriePtr ptr, TrieState & state)
         {
-            cerr << "insert_as " << type_name<Leaf>() << endl;
             Leaf * l = ptr.as<Leaf>();
             if (!l) l = create<Leaf>();
             
@@ -2141,35 +2159,32 @@ struct Trie {
                 return result;
             }
 
-            cerr << "insert_as " << type_name<Leaf>() << ": need expand"
-                 << endl;
+            //int depth = state.depth();
+            //cerr << "===== leaf expand depth " << state.depth() << endl;
 
-            // Insert failed; we need to expand the current node, and then
-            // insert it back in
+            //ptr.dump(*this, cerr, 4, 0);
+
+            //cerr << "ptr depth " << depth << " = " << ptr << endl;
             TriePtr expanded = expand_as<Leaf>(ptr, state);
+            //cerr << "expanded depth = " << depth << " = " << expanded << endl;
 
-            cerr << "insert_as " << type_name<Leaf>() << ": done expand"
-                 << endl;
+            //expanded.dump(*this, cerr, 4, 0);
 
-            // Free the current pointer
-            //cerr << "freeing " << endl;
-            //l->dump(cerr, 0, 0);
+            cerr << "destroying " << l << " depth " << state.depth()
+                 << " key " << state.key << " l->key " << l->print() << endl;
+
             destroy(l);
+            TriePtr result = expanded.insert_recursive(*this, state);
+            //cerr << "result depth " << depth << " = " << result << endl;
 
-            cerr << "before expand insert: state " << endl;
-            state.dump(cerr);
-
-            TriePtr result = expanded.insert(*this, state);
-            
-            cerr << "after expand insert: state " << endl;
-            state.dump(cerr);
+            //result.dump(*this, cerr, 4, 0);
 
             return result;
         }
         
-        virtual TriePtr insert(TriePtr ptr, TrieState & state)
+        virtual TriePtr insert_recursive(TriePtr ptr, TrieState & state)
         {
-            TRIE_SWITCH_ON_LEAF(return insert_as, ptr.type, (ptr, state));
+            TRIE_SWITCH_ON_LEAF(return insert_recursive_as, ptr.type, (ptr, state));
         }
 
         template<typename Leaf>
@@ -2315,7 +2330,7 @@ struct Trie {
         //cerr << "state init" << endl;
         //state.dump(cerr, ops);
 
-        TriePtr val = itl.root.insert(ops, state);
+        TriePtr val = itl.root.insert_recursive(ops, state);
 
         if (itl.root != val) itl.root = val;
 
@@ -2354,7 +2369,7 @@ size_t memusage(const Trie<Alloc> & trie)
     return trie.memusage();
 }
 
-#if 1
+#if 0
 
 BOOST_AUTO_TEST_CASE( test_trie )
 {
@@ -2429,6 +2444,8 @@ BOOST_AUTO_TEST_CASE( test_all_memory_freed )
     BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 }
 
+#endif
+
 uint64_t rand64()
 {
     uint64_t h = random(), l = random();
@@ -2454,10 +2471,10 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
             uint64_t v = rand64();
 
             try {
-                cerr << endl;
-                cerr << "*************************************************"
-                     << endl;
-                cerr << "i = " << i << " v = " << v << endl;
+                //cerr << endl;
+                //cerr << "*************************************************"
+                //     << endl;
+                cerr << "i = " << i << " v = " << format("%016lx", v) << endl;
 
                 trie[v] = v;
                 test_map[v] = v;
@@ -2466,7 +2483,8 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
                     throw Exception("consistency problem at %d: %016lx != %016lx",
                                     i, v, trie[v]);
                 //BOOST_REQUIRE_EQUAL(trie[v], v);
-                
+
+                if (i % 10000 != 9999) continue;
                 for (map<uint64_t, uint64_t>::const_iterator
                          it = test_map.begin(), end = test_map.end();
                      it != end;  ++it) {
@@ -2506,6 +2524,8 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
     BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
     BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 }
+
+#if 0
 
 BOOST_AUTO_TEST_CASE( trie_stress_test_uniform )
 {
