@@ -341,6 +341,9 @@ struct TrieOps : public TrieAllocator {
     // Expand the branch at ptr so that a new element can be inserted into it
     virtual TriePtr expand(TriePtr ptr, TrieState & state) = 0;
 
+    // Is the iterator null?
+    virtual bool not_null(TriePtr ptr, int16_t iterator) const = 0;
+
     // How many characters does this match?
     virtual int width(TriePtr ptr) const = 0;
 
@@ -632,14 +635,21 @@ struct TriePath {
             ExcAssert(width_ <= 8);
             ExcAssert(width_ >= depth_);
             
-            for (unsigned i = 0;  i < depth_;  ++i) {
+            for (int i = 0;  i < depth_;  ++i) {
                 Entry & entry = entries_[i];
                 total_width += entry.width;
+                ExcAssert(entry.width > 0);
                 ExcAssert(entry.ptr.ptr != 0);
                 ExcAssert(entry.width == entry.ptr.width(ops));
                 ExcAssert(!ptrs.count(entry.ptr.ptr));
+                ExcAssert(entry.iterator >= 0);
                 ptrs.insert(entry.ptr.ptr);
-                
+
+                if (i < depth_ - 1) {
+                    ExcAssert(entry.ptr.dereference(ops, entry.iterator)
+                              == entries_[i + 1].ptr);
+                }
+
                 //if (!last_invalid || i != depth_ = 1) {
                 //}
             }
@@ -869,6 +879,7 @@ struct SingleTrieBase {
     // null pointer.
     int16_t match(const TrieKey & key, int done_width)
     {
+        ExcAssert(width_ > 0);
 #if 0
         cerr << "match() for " << print() << endl;
         cerr << "done_width " << done_width << " width_ = " << (int)width_
@@ -938,6 +949,30 @@ struct SingleTrieBase {
         return result;
     }
 
+    template<typename MultiLeaf, typename Me>
+    TriePtr
+    do_expand(Me * me, TrieOps & ops, TrieState & state)
+    {
+        // Convert to a multi leaf
+        MultiLeaf * new_leaf
+            = ops.create<MultiLeaf>(width_);
+        
+        // Insert us
+        new_leaf->dereference(new_leaf->insert(key_, 0)) = payload_;
+    
+        TriePtr result = new_leaf;
+
+        if (false) {
+            cerr << "  --> single expand mem " << me->memusage(ops) << endl;
+            me->dump(ops, cerr, 0, 0);
+            cerr << "  --> after single expand mem "
+                 << result.memusage(ops) << endl;
+            result.dump(ops, cerr, 0, 0);
+        }
+        
+        return result;
+    }
+
     uint8_t width_;
     TrieKey key_;
     Payload payload_;
@@ -962,10 +997,7 @@ struct SingleTrieNode : public SingleTrieBase<TriePtr> {
         return payload_.size(ops);
     }
 
-    TriePtr expand(const TrieOps & ops, TrieState & state)
-    {
-        throw Exception("single node needs to expand");
-    }
+    TriePtr expand(TrieOps & ops, TrieState & state);
 
     void dump(TrieOps & ops, std::ostream & stream, int indent,
               int first_indent) const
@@ -1185,8 +1217,9 @@ struct MultiTrieBase {
     {
         int prefix_start = 0;
 
-        cerr << "expand_to: split_point " << split_point << endl;
-        me->dump(ops, cerr, 0, 0);
+        //cerr << "expand_to: " << type_name<NewNode>()
+        //     << ": split_point " << split_point << endl;
+        //me->dump(ops, cerr, 0, 0);
 
         int num_prefixes = 0;
 
@@ -1205,17 +1238,18 @@ struct MultiTrieBase {
             // Num suffixes with this prefix
             int num_suffixes = (i - prefix_start);
 
-            cerr << "i = " << i << " num_suffixes = " << num_suffixes
-                 << " num_prefixes = " << num_prefixes << endl;
+            //cerr << "i = " << i << " num_suffixes = " << num_suffixes
+            //     << " num_prefixes = " << num_prefixes << endl;
 
             TriePtr new_leaf_ptr;
             const Entry & entry = entries_[prefix_start];
 
             if (num_suffixes == 1) {
                 // New single leaf
-                SingleLeaf * new_leaf
-                    = ops.create<SingleLeaf>();
+                SingleLeaf * new_leaf = ops.create<SingleLeaf>();
                 new_leaf->width_ = width_ - split_point;
+                
+                ExcAssert(new_leaf->width_ > 0);
 
                 new_leaf->key_.init(entry.key, split_point, width_ - split_point);
                 new_leaf->payload_ = entry.payload;
@@ -1248,7 +1282,8 @@ struct MultiTrieBase {
 
                 SingleNode * new_prefix = ops.create<SingleNode>();
                 new_prefix->width_ = split_point;
-                new_prefix->key_.init(entries_[i].key, 0, split_point);
+                new_prefix->key_.init(entries_[prefix_start].key,
+                                      0, split_point);
 
                 // If we're at the last character, then we need a dense
                 // leaf.  Otherwise, we need a dense node followed by
@@ -1272,6 +1307,11 @@ struct MultiTrieBase {
 
                     // And our resulting node is the prefix
                     new_leaf_ptr.set(new_prefix);
+
+                    //cerr << "finished expand" << endl;
+                    //new_leaf_ptr.dump(ops, cerr, 0, 0);
+
+                    return new_leaf_ptr;
                 }
                 else {
                     me->dump(ops, cerr, 0, 0);
@@ -1285,8 +1325,7 @@ struct MultiTrieBase {
             prefix_start = i;
         }
 
-        TriePtr result;
-        result.set_node(new_node);
+        TriePtr result = new_node;
 
         if (false) {
             cerr << "  --> before split prefix mem " << me->memusage(ops) << endl;
@@ -1333,7 +1372,7 @@ struct MultiTrieBase {
 
         for (int split_point = 1;  split_point < width_;  ++split_point) {
 
-            cerr << "split point " << split_point << endl;
+            //cerr << "split point " << split_point << endl;
 
             // How many different prefixes at this split point?
             int num_prefixes = 0;
@@ -1372,19 +1411,22 @@ struct MultiTrieBase {
                 // Different prefix
                 ++num_prefixes;
 
-
+#if 0
                 cerr << "  prefix " << entries_[i - 1].key.print(split_point)
                      << " (" << num_prefixes << "): num_suffixes "
                      << num_suffixes << " num_prefixes = " << num_prefixes
                      << " max_num_suffixes = " << max_num_suffixes
                      << endl;
+#endif
 
                 prefix_start = i;
             }
 
+#if 0
             cerr << "split_point = " << split_point << " num_prefixes = "
                  << num_prefixes << " max_num_suffixes = "
                  << max_num_suffixes << " width() = " << width() << endl;
+#endif
 
             TriePtr result;
 
@@ -1843,12 +1885,11 @@ width(TrieOps & ops) const
     TRIE_SWITCH_ON_NODE(return width_as, ());
 }
 
-#if 0
 bool
 TriePtr::
 not_null(TrieOps & ops, uint16_t iterator) const
 {
-    if (!ptr) return 0;
+    if (!ptr) return false;
     if (is_leaf) return ops.not_null(*this, iterator);
     TRIE_SWITCH_ON_NODE(return as, ()->not_null(iterator));
 }
@@ -1857,11 +1898,10 @@ TriePtr
 TriePtr::
 dereference(TrieOps & ops, uint16_t iterator) const
 {
-    if (!ptr) return 0;
-    if (is_leaf) return ops.dereference(*this, iterator);
+    if (!ptr) throw Exception("dereferencing a null pointer");
+    if (is_leaf) throw Exception("dereferencing a leaf");
     TRIE_SWITCH_ON_NODE(return as, ()->dereference(iterator));
 }
-#endif
 
 std::string
 TriePtr::
@@ -1924,12 +1964,12 @@ struct DenseTrieLeaf : public DenseTrieBase<uint64_t> {
     void dump(TrieOps & ops, std::ostream & stream,
               int indent, int first_indent) const
     {
-        string i(indent, ' ');
-        if (first_indent) stream << i;
+        string ii(indent, ' ');
+        if (first_indent) stream << ii;
         stream << print() << endl;
         for (unsigned i = 0;  i < 256;  ++i) {
             if (presence[i]) {
-                stream << "  " << format("%02x", i) << " --> "
+                stream << ii << "  " << format("%02x", i) << " --> "
                        << children[i] << endl;
             }
         }
@@ -2006,25 +2046,7 @@ TriePtr
 SingleTrieLeaf::
 expand(TrieOps & ops, TrieState & state)
 {
-    // Convert to a multi leaf
-    MultiTrieLeaf * new_leaf
-        = ops.create<MultiTrieLeaf>(width_);
-    
-    // Insert us
-    new_leaf->dereference(new_leaf->insert(key_, 0)) = payload_;
-    
-    TriePtr result;
-    result.set_leaf(new_leaf);
-
-    if (false) {
-        cerr << "  --> single expand mem " << this->memusage(ops) << endl;
-        this->dump(ops, cerr, 0, 0);
-        cerr << "  --> after single expand mem "
-             << result.memusage(ops) << endl;
-        result.dump(ops, cerr, 0, 0);
-    }
-
-    return result;
+    return this->do_expand<MultiTrieLeaf>(this, ops, state);
 }
 
 TriePtr
@@ -2045,6 +2067,12 @@ expand(TrieOps & ops, TrieState & state)
         (this, ops, state);
 }
 
+TriePtr
+SingleTrieNode::
+expand(TrieOps & ops, TrieState & state)
+{
+    return this->SingleTrieBase<TriePtr>::do_expand<MultiTrieNode>(this, ops, state);
+}
 
 #define TRIE_SWITCH_ON_LEAF(action, type, args)                         \
     do {                                                                \
@@ -2258,6 +2286,11 @@ struct Trie {
             TRIE_SWITCH_ON_LEAF(return dereference_as, ptr.type, (ptr, iterator));
         }
 
+        bool not_null(TriePtr ptr, int16_t iterator) const
+        {
+            TRIE_SWITCH_ON_LEAF(return ptr.as, ptr.type, ()->not_null(iterator));
+        }
+
         template<typename Leaf>
         std::string print_as(TriePtr ptr) const
         {
@@ -2355,6 +2388,11 @@ struct Trie {
 
         bool debug = false;//state.key == 0x62fb965c1a345131;
 
+        if (debug) {
+            cerr << "before insert_recursive" << endl;
+            dump(cerr, 0, 0);
+        }
+
         TriePtr val = itl.root.insert_recursive(ops, state);
 
         if (itl.root != val) itl.root = val;
@@ -2366,8 +2404,10 @@ struct Trie {
             state.dump(cerr, ops);
             cerr << endl;
 
-            cerr << "entry 1: " << endl;
-            state.at_depth(1).ptr.dump(ops, cerr, 0, 0);
+            
+
+            //cerr << "entry 1: " << endl;
+            //state.at_depth(1).ptr.dump(ops, cerr, 0, 0);
         }
 
         return ops.dereference(state.back().ptr, state.back().iterator);
@@ -2399,7 +2439,7 @@ size_t memusage(const Trie<Alloc> & trie)
     return trie.memusage();
 }
 
-#if 0
+#if 1
 
 BOOST_AUTO_TEST_CASE( test_trie )
 {
@@ -2573,6 +2613,54 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform )
             //cerr << "i = " << i << endl;
             uint64_t v = i;
             trie[v] = v;
+
+            if (trie[v] != v)
+                throw Exception("problem in insert");
+        }
+
+        //trie.dump(cerr, 0, 0);
+
+        cerr << "trie.size() = " << trie.size() << endl;
+        cerr << "memusage(trie) = " << memusage(trie) << endl;
+        cerr << "efficiency = " << 16.0 * trie.size() / memusage(trie) << endl;
+        cerr << (1.0 * memusage(trie) / trie.size()) << " bytes/entry" << endl;
+
+        BOOST_CHECK(data.bytes_outstanding > 0);
+        BOOST_CHECK(data.objects_outstanding > 0);
+    }
+
+    BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+    BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+}
+
+BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd )
+{
+    Testing_Allocator_Data data;
+    Testing_Allocator allocator(data);
+
+    {
+        //Trie<Testing_Allocator> trie(allocator);
+        Trie<> trie;
+
+        BOOST_CHECK_EQUAL(data.bytes_outstanding, 0);
+        BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
+
+        for (unsigned i = 0;  i < 100000;  ++i) {
+            //cerr << "i = " << i << endl;
+            uint64_t v = i;
+            char * c1 = reinterpret_cast<char *>(&v);
+            std::reverse(c1, c1 + 8);
+            try {
+                trie[v] = i;
+                
+                if (trie[v] != i)
+                    throw Exception("problem in insert");
+            }
+            catch (...) {
+                cerr << "i = " << i << endl;
+                trie.dump(cerr, 0, 0);
+                throw;
+            }
         }
 
         //trie.dump(cerr, 0, 0);
@@ -2594,7 +2682,7 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform )
 
 #if 1
 
-BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd )
+BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd2 )
 {
     Testing_Allocator_Data data;
     Testing_Allocator allocator(data);
@@ -2607,15 +2695,28 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd )
         BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 
         for (unsigned i = 0;  i < 100000;  ++i) {
-            //cerr << "i = " << i << endl;
-            uint64_t v = i;
+            uint64_t v = i * 256;
             char * c1 = reinterpret_cast<char *>(&v);
             std::reverse(c1, c1 + 8);
-            trie[v] = i;
-        }
+            try {
+                trie[v] = i;
+                
+                if (trie[v] != i)
+                    throw Exception("problem in insert");
 
+                if (trie.size() != i)
+                    throw Exception("trie did not get bigger");
+            }
+            catch (...) {
+                cerr << "i = " << i << endl;
+                trie.dump(cerr, 0, 0);
+                throw;
+            }
+        }
+        
         //trie.dump(cerr, 0, 0);
 
+        cerr << "uniform bwd 2" << endl;
         cerr << "trie.size() = " << trie.size() << endl;
         cerr << "memusage(trie) = " << memusage(trie) << endl;
         cerr << "efficiency = " << 16.0 * trie.size() / memusage(trie) << endl;
