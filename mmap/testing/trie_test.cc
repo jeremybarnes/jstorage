@@ -1213,6 +1213,8 @@ struct MultiTrieBase {
             }
             else {
                 // Something is wrong; 
+                cerr << "num_suffixes = " << num_suffixes << endl;
+                me->dump(ops, cerr, 0, 0);
                 throw Exception("too many suffixes when dense node "
                                 "split out");
             }
@@ -1299,7 +1301,9 @@ struct MultiTrieBase {
             }
             else {
                 // Something is wrong; 
-                throw Exception("too many suffixes when dense node "
+                cerr << "num_suffixes = " << num_suffixes << endl;
+                me->dump(ops, cerr, 0, 0);
+                throw Exception("too many suffixes when multi node "
                                 "split out");
             }
 
@@ -2415,7 +2419,7 @@ size_t memusage(const Trie<Alloc> & trie)
     return trie.memusage();
 }
 
-#if 0
+#if 1
 
 BOOST_AUTO_TEST_CASE( test_trie )
 {
@@ -2575,7 +2579,7 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_random )
     BOOST_CHECK_EQUAL(data.objects_outstanding, 0);
 }
 
-#if 0
+#if 1
 
 BOOST_AUTO_TEST_CASE( trie_stress_test_uniform )
 {
