@@ -1183,34 +1183,34 @@ struct MultiTrieBase {
                    << endl;
     }
 
-    template<class DenseNode, class SingleLeaf, class MultiLeaf,
-             class SingleNode, class DenseLeaf, class Me>
+    template<class NewNode, class SingleLeaf, class MultiLeaf,
+             class SingleNode, class DenseLeaf, class DenseNode, class Me>
     TriePtr
     expand_to_dense(const Me * me, TrieOps & ops, int split_point) const
     {
         // No choice but to make a dense node here
         //cerr << "Converting to dense node" << endl;
 
-        DenseNode * new_node = ops.create<DenseNode>();
+        NewNode * new_node = ops.create<NewNode>();
 
-        return expand_to<DenseNode, SingleLeaf, MultiLeaf,
-                         SingleNode, DenseLeaf, Me>
+        return expand_to<NewNode, SingleLeaf, MultiLeaf,
+                         SingleNode, DenseLeaf, DenseNode, Me>
             (me, new_node, ops, split_point);
     }
 
     template<class MultiNode, class SingleLeaf, class MultiLeaf,
-             class SingleNode, class DenseLeaf, class Me>
+             class SingleNode, class DenseLeaf, class DenseNode, class Me>
     TriePtr
     expand_to_multi(const Me * me, TrieOps & ops, int split_point) const
     {
         MultiNode * new_node = ops.create<MultiNode>(split_point);
         return expand_to<MultiNode, SingleLeaf, MultiLeaf,
-                         SingleNode, DenseLeaf, Me>
+                         SingleNode, DenseLeaf, DenseNode, Me>
             (me, new_node, ops, split_point);
     }
 
     template<class NewNode, class SingleLeaf, class MultiLeaf,
-             class SingleNode, class DenseLeaf, class Me>
+             class SingleNode, class DenseLeaf, class DenseNode, class Me>
     TriePtr
     expand_to(const Me * me, NewNode * new_node,
               TrieOps & ops, int split_point) const
@@ -1246,6 +1246,7 @@ struct MultiTrieBase {
 
             if (num_suffixes == 1) {
                 // New single leaf
+                //cerr << "new single leaf" << endl;
                 SingleLeaf * new_leaf = ops.create<SingleLeaf>();
                 new_leaf->width_ = width_ - split_point;
                 
@@ -1279,6 +1280,8 @@ struct MultiTrieBase {
                 // Same number of suffixes as entries, so there is only one
                 // prefix.  We need to create a single node for this prefix,
                 // and then create a dense node at the end.
+
+                //cerr << "*** creating SingleNode" << endl;
 
                 SingleNode * new_prefix = ops.create<SingleNode>();
                 new_prefix->width_ = split_point;
@@ -1314,6 +1317,36 @@ struct MultiTrieBase {
                     return new_leaf_ptr;
                 }
                 else {
+                    // Dense node pointing to single leaves
+                    DenseNode * new_node = ops.create<DenseNode>();
+                    
+                    unsigned j2 = 0;
+                    for (unsigned j = prefix_start;  j < i;  ++j, ++j2) {
+                        const Entry & entry = entries_[j];
+                        
+                        int it = new_node->insert(entry.key, split_point);
+
+                        SingleLeaf * new_leaf = ops.create<SingleLeaf>();
+                        new_leaf->width_ = width_ - split_point - 1;
+
+                        new_leaf->key_.init(entry.key, split_point + 1, 1);
+                        new_leaf->payload_ = entry.payload;
+
+                        new_node->set_ptr(it, new_leaf);
+                    }
+
+                    // Hook the dense node onto its prefix
+                    new_prefix->payload_ = new_node;
+
+                    // And our resulting node is the prefix
+                    new_leaf_ptr.set(new_prefix);
+
+                    //cerr << "finished expand prefix -> dense -> suffix" << endl;
+                    //new_leaf_ptr.dump(ops, cerr, 0, 0);
+
+                    return new_leaf_ptr;
+
+
                     me->dump(ops, cerr, 0, 0);
                     throw Exception("need to handle prefix -> dense -> suffix case: split point %d width %d", split_point, width());
                 }
@@ -1336,6 +1369,74 @@ struct MultiTrieBase {
 
         return result;
     }
+
+#if 0
+
+    template<class MultiNode, class DenseNode,
+             class SingleLeaf, class MultiLeaf,
+             class SingleNode, class DenseLeaf, class Me>
+    size_t best_memory_for(Me * me, TrieOps & ops,
+                           int done_chars, int first_key, int last_key)
+    {
+        if (first_key >= last_key)
+            throw Exception("best_memory_for with %d-%d", first_key, last_key);
+
+        if (done_chars >= width_)
+            throw Exception("done_chars >= 8");
+
+        int nkeys = last_key - first_key;
+        int nchars = width_ - split_point;
+
+        // Easy case: if there's only one key, we just need a single node
+        if (nkeys == 1) 
+            return sizeof(SingleLeaf);
+
+        // Only one char?  Only thing that makes sense is to make it a
+        // multi node
+        if (nchars == 1)
+            return sizeof(MultiLeaf);
+
+        size_t best_mem = -1;
+
+        // Otherwise, look through the different split points
+        for (unsigned split_point = done_chars + 1;  split_point < width_;  ++i) {
+            for (unsigned i = first_key + 1;  i <= last_key;  ++i) {
+                if (i < last_key
+                    && TrieKey::equal_ranges(entries_[i].key, done_chars,
+                                             entries_[i - 1].key, done_chars,
+                                             split_point)) {
+                    continue;
+                }
+                
+                // Memory calculation for children
+                int num_suffixes = (i - prefix_start);
+
+                if (num_suffixes == 0)
+                    throw Exception("invalid num suffixes");
+
+                max_num_suffixes = std::max(num_suffixes, max_num_suffixes);
+
+                ++num_prefixes;
+                prefix_start = i;
+            }
+
+            // If there's a single prefix, when we can make a prefix node
+            if (num_prefixes == 1) {
+                size_t single_mem = sizeof(SingleNode);
+                single_mem += best_memory_for<MultiNode, DenseNode,
+                    SingleLeaf, MultiLeaf, SingleNode, DenseLeaf>
+                    (me, ops, split_point, first_key, last_key);
+                
+            }
+
+            // Splitting after one character: we could make it dense
+            if (split_point == done_chars + 1) {
+                size_t dense_mem = sizeof(DenseNode);
+            }
+        }  
+    }
+
+#endif
 
     template<class MultiNode, class DenseNode,
              class SingleLeaf, class MultiLeaf,
@@ -1368,7 +1469,9 @@ struct MultiTrieBase {
         // This will need to be sped up...
         // TODO: take the inserted entry into account as well
 
-        // How much memory usage for different situations?
+        int lowest_num_prefixes = 100;
+        int lowest_prefixes_at = -1;
+        int max_suffixes_at = -1;
 
         for (int split_point = 1;  split_point < width_;  ++split_point) {
 
@@ -1410,7 +1513,6 @@ struct MultiTrieBase {
 
                 // Different prefix
                 ++num_prefixes;
-
 #if 0
                 cerr << "  prefix " << entries_[i - 1].key.print(split_point)
                      << " (" << num_prefixes << "): num_suffixes "
@@ -1420,36 +1522,59 @@ struct MultiTrieBase {
 #endif
 
                 prefix_start = i;
+
+                // What's the best way to represent this group of suffixes?
+                // - A single node?
+                // - A dense node with single or multi nodes underneath?
+                // - A multi node for a prefix, followed by a multi node
+
+                size_t suffix_group_mem = 0;
+                if (num_suffixes == 1)
+                    suffix_group_mem = sizeof(SingleLeaf);
+                else if (num_suffixes < NUM_ENTRIES)
+                    suffix_group_mem = sizeof(MultiLeaf);
+                else suffix_group_mem = sizeof(DenseLeaf);
+            }
+
+            if (num_prefixes <= lowest_num_prefixes) {
+                lowest_num_prefixes = num_prefixes;
+                lowest_prefixes_at = split_point;
+                max_suffixes_at = max_num_suffixes;
             }
 
 #if 0
             cerr << "split_point = " << split_point << " num_prefixes = "
                  << num_prefixes << " max_num_suffixes = "
                  << max_num_suffixes << " width() = " << width() << endl;
+            cerr << "  lowest_num_prefixes " << lowest_num_prefixes
+                 << " lowest_preifxes_at " << lowest_prefixes_at
+                 << " max_suffixes_at " << max_suffixes_at
+                 << endl;
 #endif
+
 
             TriePtr result;
 
-            if (num_prefixes == NUM_ENTRIES) {
+            if (num_prefixes == NUM_ENTRIES && false) {
                 result = expand_to_dense<DenseNode, SingleLeaf, MultiLeaf,
-                                         SingleNode, DenseLeaf>
+                                         SingleNode, DenseLeaf, DenseNode>
                     (me, ops, split_point);
             }
-            else if (max_num_suffixes <= NUM_ENTRIES / 2) {
+            else if (max_num_suffixes <= NUM_ENTRIES / 2 && false) {
                 result = expand_to_multi<MultiNode, SingleLeaf, MultiLeaf,
-                                         SingleNode, DenseLeaf>
+                                         SingleNode, DenseLeaf, DenseNode>
                     (me, ops, split_point);
             }
             else if (split_point == width() - 1) {
-                if (max_num_suffixes < NUM_ENTRIES) {
+                if (max_suffixes_at < NUM_ENTRIES) {
                     result = expand_to_multi<MultiNode, SingleLeaf, MultiLeaf,
-                                             SingleNode, DenseLeaf>
-                        (me, ops, split_point);
+                                             SingleNode, DenseLeaf, DenseNode>
+                        (me, ops, lowest_prefixes_at);
                 }
                 else {
                     result = expand_to_dense<DenseNode, SingleLeaf, MultiLeaf,
-                                             SingleNode, DenseLeaf>
-                        (me, ops, split_point);
+                                             SingleNode, DenseLeaf, DenseNode>
+                        (me, ops, lowest_prefixes_at);
                 }
             }
             else continue;
@@ -2384,12 +2509,12 @@ struct Trie {
         TrieState state(key);
 
         //cerr << "state init" << endl;
-        //state.dump(cerr, ops);
 
-        bool debug = false;//state.key == 0x62fb965c1a345131;
+        bool debug = false;//true;//false;//state.key == 0x62fb965c1a345131;
 
         if (debug) {
             cerr << "before insert_recursive" << endl;
+            state.dump(cerr, ops);
             dump(cerr, 0, 0);
         }
 
@@ -2402,6 +2527,7 @@ struct Trie {
         if (debug) {
             cerr << "final state: " << endl;
             state.dump(cerr, ops);
+            dump(cerr, 0, 0);
             cerr << endl;
 
             
@@ -2696,6 +2822,7 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd2 )
 
         for (unsigned i = 0;  i < 100000;  ++i) {
             uint64_t v = i * 256;
+            if (i % 1000 == 999) cerr << "i = " << i << " v = " << v << endl;
             char * c1 = reinterpret_cast<char *>(&v);
             std::reverse(c1, c1 + 8);
             try {
@@ -2704,7 +2831,7 @@ BOOST_AUTO_TEST_CASE( trie_stress_test_uniform_bwd2 )
                 if (trie[v] != i)
                     throw Exception("problem in insert");
 
-                if (trie.size() != i)
+                if (i % 1000 == 999 && trie.size() != i + 1)
                     throw Exception("trie did not get bigger");
             }
             catch (...) {
