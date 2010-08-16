@@ -59,34 +59,22 @@ struct MDAndArray : public MetadataT {
 };
 #endif
 
-template<typename T> struct Serializer;
-
-template<>
-struct Serializer<unsigned> {
-    template<typename Iterator>
-    Serializer(Iterator first, Iterator last)
-    {
-        
-    }
-
-    Serializer()
+/** Small class to hold a count of bits so that length and number of bits
+    parameters don't get confused */
+struct Bits {
+    explicit Bits(size_t bits)
+        : bits_(bits)
     {
     }
 
-    void scan(unsigned value)
-    {
-    }
-    
-    unsigned bits() const { return 32; }
+    size_t value() const { return bits_; }
 
-    unsigned extract(const void * mem, int n) const
+    Bits operator * (size_t length) const
     {
-        const unsigned * p = reinterpret_cast<const unsigned *>(mem);
-        return p[n];
+        return Bits(bits_ * length);
     }
 
-    
-    
+    size_t bits_;
 };
 
 struct MemoryManager {
@@ -96,18 +84,95 @@ struct MemoryManager {
         return reinterpret_cast<const char *>(offset);
     }
 
+    size_t encode(void * ptr)
+    {
+        return reinterpret_cast<size_t>(ptr);
+    }
+
+    /** How many words of memory do we need to cover the given number of
+        bits?  Returns the result in the first entry and the number of
+        wasted bits in the second.
+    */
+    static std::pair<size_t, size_t> words_to_cover(Bits bits)
+    {
+        size_t nbits = bits.value();
+        size_t factor = 8 * sizeof(long);
+        size_t result = nbits / factor;
+        size_t wasted = result * factor - nbits;
+        result += (wasted > 0);
+        return std::make_pair(result, wasted);
+    }
+
+    void * allocate(Bits bits, size_t length)
+    {
+        Bits nbits = bits * length;
+        size_t nwords, wasted;
+        boost::tie(nwords, wasted) = words_to_cover(nbits);
+
+        long * result = new long[nwords];
+
+        // Initialize the wasted part of memory to all zeros to avoid
+        // repeatability errors caused by non-initialization.
+        if (wasted) result[nwords - 1] = 0;
+        return result;
+    }
+};
+
+template<typename T> struct Serializer;
+
+template<>
+struct Serializer<unsigned> {
+    template<typename Iterator>
+    Serializer(Iterator first, Iterator last)
+    {
+        // No scanning to do
+    }
+
+    Serializer()
+    {
+    }
+
+    Bits bits() const { return Bits(32); }
+
+    unsigned extract(const void * mem, int n) const
+    {
+        const unsigned * p = reinterpret_cast<const unsigned *>(mem);
+        return p[n];
+    }
+
+    template<typename Iterator>
+    void serialize(MemoryManager * mm, void * mem,
+                   Iterator first, Iterator last)
+    {
+        unsigned * p = reinterpret_cast<unsigned *>(mem);
+        std::copy(first, last, p);
+    }
 };
 
 template<typename T, typename MM = MemoryManager>
 struct Array {
+    Array()
+        : mm_(0), length_(0), offset_(0)
+    {
+    }
+
+    template<typename Iterator>
+    Array(MM & mm, Iterator first, Iterator last)
+        : mm_(&mm), length_(last - first), serializer_(first, last)
+    {
+        void * mem = mm_->allocate(serializer_.bits(), length_);
+        offset_ = mm_->encode(mem);
+        serializer_.serialize(mm_, mem, first, last);
+    }
+
+    MM * mm_;
     size_t length_;
-    size_t offset_;
-    MM * mm;
     Serializer<T> serializer_;
+    size_t offset_;
 
     T extract(int element) const
     {
-        return serializer_.extract(mm->resolve(offset_), element);
+        return serializer_.extract(mm_->resolve(offset_), element);
     }
 };
 
@@ -125,6 +190,7 @@ struct Vector {
 
     template<typename T2>
     Vector(MemoryManager & mm, const std::vector<T2> & vec)
+        : array_(mm, vec.begin(), vec.end())
     {
     }
 
