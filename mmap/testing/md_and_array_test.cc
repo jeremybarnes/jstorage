@@ -16,6 +16,8 @@
 #include "jml/utils/hash_map.h"
 #include "jml/arch/demangle.h"
 #include "jml/utils/exc_assert.h"
+#include "jml/utils/vector_utils.h"
+#include "jml/arch/bit_range_ops.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <boost/utility/enable_if.hpp>
@@ -52,7 +54,7 @@ struct MDAndArray : public MetadataT {
     {
     }
 
-    PayloadT operator [] (int index)
+    PayloadT operator [] (int index) const
     {
         return Extractor<Payload>::extract(data(), index);
     }
@@ -79,12 +81,12 @@ struct Bits {
 
 struct MemoryManager {
 
-    const char * resolve(size_t offset)
+    const long * resolve(size_t offset)
     {
-        return reinterpret_cast<const char *>(offset);
+        return reinterpret_cast<const long *>(offset);
     }
 
-    size_t encode(void * ptr)
+    size_t encode(long * ptr)
     {
         return reinterpret_cast<size_t>(ptr);
     }
@@ -103,7 +105,7 @@ struct MemoryManager {
         return std::make_pair(result, wasted);
     }
 
-    void * allocate(Bits bits, size_t length)
+    long * allocate(Bits bits, size_t length)
     {
         Bits nbits = bits * length;
         size_t nwords, wasted;
@@ -117,6 +119,28 @@ struct MemoryManager {
         return result;
     }
 };
+
+struct BitWriter {
+    
+    BitWriter(long * data, Bits bit_ofs = Bits(0))
+        : data(data), bit_ofs(bit_ofs.value())
+    {
+        if (bit_ofs.value() >= sizeof(long) * 8)
+            throw Exception("invalid bitwriter initialization");
+    }
+
+    void write(long val, Bits bits)
+    {
+        set_bit_range(data, val, bit_ofs, bits.value());
+        bit_ofs += bits.value();
+        data += (bit_ofs / (sizeof(long) * 8));
+        bit_ofs %= sizeof(long) * 8;
+    }
+
+    long * data;
+    int bit_ofs;
+};
+
 
 template<typename T> struct Serializer;
 
@@ -134,18 +158,20 @@ struct Serializer<unsigned> {
 
     Bits bits() const { return Bits(32); }
 
-    unsigned extract(const void * mem, int n) const
+    unsigned extract(const long * mem, int n) const
     {
         const unsigned * p = reinterpret_cast<const unsigned *>(mem);
         return p[n];
     }
 
     template<typename Iterator>
-    void serialize(MemoryManager * mm, void * mem,
+    void serialize(BitWriter & writer,
                    Iterator first, Iterator last)
     {
-        unsigned * p = reinterpret_cast<unsigned *>(mem);
-        std::copy(first, last, p);
+        for (; first != last;  ++first) {
+            unsigned val = *first;
+            writer.write(val, bits());
+        }
     }
 };
 
@@ -158,11 +184,14 @@ struct Array {
 
     template<typename Iterator>
     Array(MM & mm, Iterator first, Iterator last)
-        : mm_(&mm), length_(last - first), serializer_(first, last)
+        : mm_(&mm),
+          length_(last - first),
+          serializer_(first, last)
     {
-        void * mem = mm_->allocate(serializer_.bits(), length_);
+        long * mem = mm_->allocate(serializer_.bits(), length_);
         offset_ = mm_->encode(mem);
-        serializer_.serialize(mm_, mem, first, last);
+        BitWriter writer(mem);
+        serializer_.serialize(writer, first, last);
     }
 
     MM * mm_;
@@ -182,8 +211,6 @@ struct Vector {
 
     Metadata array_;
 
-    const Metadata & metadata() const { return array_; }
-
     Vector()
     {
     }
@@ -199,7 +226,7 @@ struct Vector {
         return array_.length_;
     }
     
-    T operator [] (int index)
+    T operator [] (int index) const
     {
         return array_.extract(index);
     }
@@ -207,7 +234,49 @@ struct Vector {
 };
 
 template<typename T>
+std::ostream & operator << (std::ostream & stream, const Vector<T> & vec)
+{
+    stream << "[ ";
+    for (unsigned i = 0;  i < vec.size();  ++i) {
+        stream << vec[i] << " ";
+    }
+    return stream << "]";
+}
+
+template<typename T>
 struct Serializer<Vector<T> > {
+
+    template<typename Iterator>
+    Serializer(Iterator first, Iterator last)
+    {
+        // No scanning to do
+    }
+
+    Serializer()
+    {
+    }
+
+    struct Metadata {
+        size_t length;
+        size_t offset;
+    };
+
+    // Serialize as a size_t and a pointer
+    Bits bits() const { return Bits(sizeof(Metadata) * 8); }
+
+    Vector<T> extract(const long * mem, int n) const
+    {
+        const Metadata * p = reinterpret_cast<const Metadata *>(mem);
+        return p[n];
+    }
+
+    template<typename Iterator>
+    void serialize(BitWriter & writer,
+                   Iterator first, Iterator last)
+    {
+        size_t * p = reinterpret_cast<size_t *>(mem);
+        std::copy(first, last, p);
+    }
 };
 
 // Two cases:
@@ -228,7 +297,35 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
+template<typename T1, typename T2>
+bool operator == (const Vector<T1> & v1, const std::vector<T2> & v2);
+
+template<typename T1, typename T2>
+bool operator == (const std::vector<T1> & v1, const Vector<T2> & v2)
+{
+    return v2 == v1;
+}
+
 BOOST_AUTO_TEST_CASE(test_nested1)
 {
-    Vector<Vector<int> > v2;
+    MemoryManager mm;
+
+    vector<unsigned> values1 = boost::assign::list_of<int>(1)(2)(3)(4);
+    vector<unsigned> values2 = boost::assign::list_of<int>(5)(6);
+    vector<unsigned> values3;
+    vector<unsigned> values4 = boost::assign::list_of<int>(7)(8)(9)(10)(11);
+
+    vector<vector<unsigned> > values;
+    values.push_back(values1);
+    values.push_back(values2);
+    values.push_back(values3);
+    values.push_back(values4);
+
+    Vector<Vector<unsigned> > v1(mm, values);
+
+    BOOST_CHECK_EQUAL(v1.size(), values.size());
+    BOOST_CHECK_EQUAL(v1[0], values[0]);
+    BOOST_CHECK_EQUAL(v1[1], values[1]);
+    BOOST_CHECK_EQUAL(v1[2], values[2]);
+    BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
