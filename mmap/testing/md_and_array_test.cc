@@ -144,6 +144,39 @@ struct BitWriter {
 
 template<typename T> struct Serializer;
 
+template<typename T>
+struct CollectionSerializer {
+    
+    typedef Serializer<T> Base;
+
+    typename Serializer<T>::Width width;
+    size_t width;
+
+    Bits bits() const { return Base::width_to_bits(width); }
+
+    // Extract entry n out of the total
+    unsigned extract(const long * mem, int n) const
+    {
+        const unsigned * p = reinterpret_cast<const unsigned *>(mem);
+        return p[n];
+    }
+
+    // Serialize a homogeneous collection where each of the elements is an
+    // unsigned.  We don't serialize any details of the collection itself.
+    template<typename Iterator>
+    void serialize_collection(BitWriter & writer,
+                              Iterator first, Iterator last)
+    {
+        for (; first != last;  ++first) {
+            unsigned val = *first;
+            writer.write(val, bits());
+        }
+    }
+};
+
+template<> struct Serializer<Bits>;
+
+
 template<>
 struct Serializer<unsigned> {
     template<typename Iterator>
@@ -156,22 +189,35 @@ struct Serializer<unsigned> {
     {
     }
 
-    Bits bits() const { return Bits(32); }
+    // The thing that we're reading
+    typedef unsigned Value;
 
-    unsigned extract(const long * mem, int n) const
+    // The type of something that holds the width.  This is going to have a
+    // maximum value of 32.
+    typedef unsigned Width;
+
+    // Object to serialize a width
+    typedef Serializer<Bits> WidthSerializer;
+
+    // Object to serialize a collection of widths
+    typedef CollectionSerializer<Bits> WidthCollectionSerializer;
+
+    // Serialize a single object, given a width
+    void serialize(BitWriter & writer, Value value, Width width) const
     {
-        const unsigned * p = reinterpret_cast<const unsigned *>(mem);
-        return p[n];
+        writer.write(value, width);
     }
 
-    template<typename Iterator>
-    void serialize(BitWriter & writer,
-                   Iterator first, Iterator last)
+    // Reconstitute a single object, given a width
+    Value reconstitute(BitReader & reader, Width width) const
     {
-        for (; first != last;  ++first) {
-            unsigned val = *first;
-            writer.write(val, bits());
-        }
+        return reader.read(value, width);
+    }
+
+    // How many bits do we need to implement the width?
+    Bits width_to_bits(Width width) const
+    {
+        return width;
     }
 };
 
@@ -256,13 +302,10 @@ struct Serializer<Vector<T> > {
     {
     }
 
-    struct Metadata {
-        size_t length;
-        size_t offset;
-    };
+    size_t length;
+    size_t offset;
 
-    // Serialize as a size_t and a pointer
-    Bits bits() const { return Bits(sizeof(Metadata) * 8); }
+    Bits bits() const { return Bits(0); }
 
     Vector<T> extract(const long * mem, int n) const
     {
@@ -270,12 +313,27 @@ struct Serializer<Vector<T> > {
         return p[n];
     }
 
+    // Serialize a homogeneous collection, each element of which is a
+    // Vector<T>.
     template<typename Iterator>
-    void serialize(BitWriter & writer,
-                   Iterator first, Iterator last)
+    void serialize_collection(BitWriter & writer,
+                              Iterator first, Iterator last)
     {
-        size_t * p = reinterpret_cast<size_t *>(mem);
-        std::copy(first, last, p);
+        // We're serializing a vector of vectors; each element of the
+        // iterator is a Vector<T>.
+        // 1.  Size each of the sub-collections individually
+        // 2.  Serialize the sub-collections to get the offsets and
+        //     lengths.
+        // 3.  Serialize the objects themselves
+
+        size_t n = last - first;
+        vector<Serializer<T> > serializers;
+
+        Serializer<T> serializer;
+        for (; first != last;  ++first) {
+            T to_write = *first;
+            serializer.serialize(T);
+        }
     }
 };
 
@@ -296,6 +354,8 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
     BOOST_CHECK_EQUAL(v1[2], values[2]);
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
+
+#if 0
 
 template<typename T1, typename T2>
 bool operator == (const Vector<T1> & v1, const std::vector<T2> & v2);
@@ -329,3 +389,5 @@ BOOST_AUTO_TEST_CASE(test_nested1)
     BOOST_CHECK_EQUAL(v1[2], values[2]);
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
+
+#endif
