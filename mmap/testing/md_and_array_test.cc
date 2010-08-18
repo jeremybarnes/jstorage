@@ -39,8 +39,13 @@ using namespace std;
 using namespace ML;
 
 
+/*****************************************************************************/
+/* MEMORY MANAGEMENT AND SERIALIZATION                                       */
+/*****************************************************************************/
+
 /** Small class to hold a count of bits so that length and number of bits
-    parameters don't get confused */
+    parameters don't get confused.
+*/
 struct Bits {
     explicit Bits(size_t bits = 0)
         : bits_(bits)
@@ -160,6 +165,10 @@ struct BitReader {
 };
 
 
+/*****************************************************************************/
+/* SERIALIZERS AND COLLECTIONSERIALIZERS                                     */
+/*****************************************************************************/
+
 template<typename T> struct Serializer;
 
 template<typename T>
@@ -206,7 +215,51 @@ struct CollectionSerializer {
     }
 };
 
-template<> struct Serializer<Bits>;
+template<typename T>
+struct Serializer<CollectionSerializer<T> > {
+
+    // The thing that we're reading
+    typedef CollectionSerializer<T> Value;
+
+    // The type of something that holds the metadata about a collection of
+    // vectors.  The information that needs to be held is:
+    // - A list containing the length of each element;
+    // - A list containing the pointer offset of each element;
+    // - A list containing the sizing information necessary for the elements
+    //   in that list
+
+    typedef CollectionSerializer<T> Metadata;
+
+    // Prepare a single item for serialization, updating the metadata
+    static void prepare(Value value, Metadata & metadata, int item_number)
+    {
+        metadata.value()
+            = std::max<size_t>(metadata.value(), highest_bit(value, -1) + 1);
+    }
+
+    // Serialize a single vector object
+    template<typename ValueT>
+    static void serialize(BitWriter & writer,
+                          const ValueT & value,
+                          const Metadata & metadata,
+                          int object_num)
+    {
+        throw Exception("serialize(): not done");
+        // The sub-items are already done, so there's nothing left to do.
+    }
+
+    // Reconstitute a single object, given metadata
+    static Value reconstitute(BitReader & reader, Metadata metadata)
+    {
+        return reader.read(metadata);
+    }
+
+    // How many bits do we need to implement the metadata?
+    static Bits metadata_width(Metadata metadata)
+    {
+        return metadata;
+    }
+};
 
 template<>
 struct Serializer<unsigned> {
@@ -218,12 +271,6 @@ struct Serializer<unsigned> {
     // of the widest entry.  The maximum value is therefore 32 on most
     // platforms in existence today.
     typedef Bits Metadata;
-
-    // Object to serialize metadata
-    typedef Serializer<Bits> MetadataSerializer;
-
-    // Object to serialize a collection of metadatas
-    typedef CollectionSerializer<Bits> MetadataCollectionSerializer;
 
     // Serialize a single unsigned value, given metadata
     template<typename ValueT>
@@ -254,51 +301,10 @@ struct Serializer<unsigned> {
     }
 };
 
-#if 0
-template<typename T>
-struct Serializer<CollectionSerializer<T> > {
 
-    // The thing that we're reading
-    typedef CollectionSerializer<T> Value;
-
-    // The metadata about a collection of unsigned is just the width in bits
-    // of the widest entry.  The maximum value is therefore 32 on most
-    // platforms in existence today.
-    typedef Bits Metadata;
-
-    // Object to serialize metadata
-    typedef Serializer<Bits> MetadataSerializer;
-
-    // Object to serialize a collection of metadatas
-    typedef CollectionSerializer<Bits> MetadataCollectionSerializer;
-
-    // Serialize a single unsigned value, given metadata
-    static void serialize(BitWriter & writer, Value value, Metadata metadata,
-                          int object_num)
-    {
-        writer.write(value, metadata);
-    }
-
-    // Reconstitute a single object, given metadata
-    static Value reconstitute(BitReader & reader, Metadata metadata)
-    {
-        return reader.read(metadata);
-    }
-
-    // How many bits do we need to implement the metadata?
-    static Bits metadata_width(Metadata metadata)
-    {
-        return metadata;
-    }
-
-    // Scan a single item, updating the metadata
-    static void prepare(Value value, Metadata & metadata, int item_number)
-    {
-        metadata.value()
-            = std::max<size_t>(metadata.value(), highest_bit(value, -1) + 1);
-    }
-};
-#endif
+/*****************************************************************************/
+/* VECTOR                                                                    */
+/*****************************************************************************/
 
 template<typename T>
 struct Vector {
@@ -380,12 +386,6 @@ struct Serializer<Vector<T> > {
     //   in that list
 
     typedef VectorMetadata<T> Metadata;
-
-    // Object to serialize metadata
-    typedef Serializer<Metadata> MetadataSerializer;
-
-    // Object to serialize a collection of metadatas
-    typedef CollectionSerializer<Metadata> MetadataCollectionSerializer;
 
     // Prepare a single item for serialization, updating the metadata
     static void prepare(Value value, Metadata & metadata, int item_number)
@@ -480,6 +480,10 @@ struct CollectionSerializer<Vector<T> > {
     }
 };
 
+
+/*****************************************************************************/
+/* TEST CASES                                                                */
+/*****************************************************************************/
 
 // Two cases:
 // 1.  Root case: the metadata object is actually present
