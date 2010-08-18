@@ -18,6 +18,7 @@
 #include "jml/utils/exc_assert.h"
 #include "jml/utils/vector_utils.h"
 #include "jml/arch/bit_range_ops.h"
+#include "jml/arch/bitops.h"
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <boost/utility/enable_if.hpp>
@@ -64,11 +65,12 @@ struct MDAndArray : public MetadataT {
 /** Small class to hold a count of bits so that length and number of bits
     parameters don't get confused */
 struct Bits {
-    explicit Bits(size_t bits)
+    explicit Bits(size_t bits = 0)
         : bits_(bits)
     {
     }
 
+    size_t & value() { return bits_; }
     size_t value() const { return bits_; }
 
     Bits operator * (size_t length) const
@@ -78,6 +80,12 @@ struct Bits {
 
     size_t bits_;
 };
+
+template<typename Integral>
+Bits operator * (Integral i, Bits b)
+{
+    return b * i;
+}
 
 struct MemoryManager {
 
@@ -141,24 +149,53 @@ struct BitWriter {
     int bit_ofs;
 };
 
+struct BitReader {
+    
+    BitReader(const long * data, Bits bit_ofs = Bits(0))
+        : data(data), bit_ofs(bit_ofs.value())
+    {
+        if (bit_ofs.value() >= sizeof(long) * 8)
+            throw Exception("invalid BitReader initialization");
+    }
+
+    long read(Bits bits)
+    {
+        long value = extract_bit_range(data, bit_ofs, bits.value());
+        bit_ofs += bits.value();
+        data += (bit_ofs / (sizeof(long) * 8));
+        bit_ofs %= sizeof(long) * 8;
+        return value;
+    }
+
+    const long * data;
+    int bit_ofs;
+};
+
 
 template<typename T> struct Serializer;
 
 template<typename T>
 struct CollectionSerializer {
-    
     typedef Serializer<T> Base;
 
     typename Serializer<T>::Width width;
-    size_t width;
 
     Bits bits() const { return Base::width_to_bits(width); }
+
+    // Scan a series of entries to figure out how to efficiently serialize
+    // them.
+    template<typename Iterator>
+    void scan(Iterator first, Iterator last)
+    {
+        for (; first != last;  ++first)
+            Base::scan(*first, width);
+    }
 
     // Extract entry n out of the total
     unsigned extract(const long * mem, int n) const
     {
-        const unsigned * p = reinterpret_cast<const unsigned *>(mem);
-        return p[n];
+        BitReader reader(mem, n * width);
+        return reader.read(width);
     }
 
     // Serialize a homogeneous collection where each of the elements is an
@@ -175,7 +212,6 @@ struct CollectionSerializer {
 };
 
 template<> struct Serializer<Bits>;
-
 
 template<>
 struct Serializer<unsigned> {
@@ -194,7 +230,7 @@ struct Serializer<unsigned> {
 
     // The type of something that holds the width.  This is going to have a
     // maximum value of 32.
-    typedef unsigned Width;
+    typedef Bits Width;
 
     // Object to serialize a width
     typedef Serializer<Bits> WidthSerializer;
@@ -203,21 +239,28 @@ struct Serializer<unsigned> {
     typedef CollectionSerializer<Bits> WidthCollectionSerializer;
 
     // Serialize a single object, given a width
-    void serialize(BitWriter & writer, Value value, Width width) const
+    static void serialize(BitWriter & writer, Value value, Width width)
     {
         writer.write(value, width);
     }
 
     // Reconstitute a single object, given a width
-    Value reconstitute(BitReader & reader, Width width) const
+    static Value reconstitute(BitReader & reader, Width width)
     {
-        return reader.read(value, width);
+        return reader.read(width);
     }
 
     // How many bits do we need to implement the width?
-    Bits width_to_bits(Width width) const
+    static Bits width_to_bits(Width width)
     {
         return width;
+    }
+
+    // Scan a single item, updating the width
+    static void scan(Value value, Width & width)
+    {
+        width.value()
+            = std::max<size_t>(width.value(), highest_bit(value, -1) + 1);
     }
 };
 
@@ -231,18 +274,18 @@ struct Array {
     template<typename Iterator>
     Array(MM & mm, Iterator first, Iterator last)
         : mm_(&mm),
-          length_(last - first),
-          serializer_(first, last)
+          length_(last - first)
     {
+        serializer_.scan(first, last);
         long * mem = mm_->allocate(serializer_.bits(), length_);
         offset_ = mm_->encode(mem);
         BitWriter writer(mem);
-        serializer_.serialize(writer, first, last);
+        serializer_.serialize_collection(writer, first, last);
     }
 
     MM * mm_;
     size_t length_;
-    Serializer<T> serializer_;
+    CollectionSerializer<T> serializer_;
     size_t offset_;
 
     T extract(int element) const
@@ -289,6 +332,7 @@ std::ostream & operator << (std::ostream & stream, const Vector<T> & vec)
     return stream << "]";
 }
 
+#if 0
 template<typename T>
 struct Serializer<Vector<T> > {
 
@@ -336,6 +380,7 @@ struct Serializer<Vector<T> > {
         }
     }
 };
+#endif
 
 // Two cases:
 // 1.  Root case: the metadata object is actually present
