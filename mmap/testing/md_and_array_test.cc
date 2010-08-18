@@ -502,79 +502,122 @@ std::ostream & operator << (std::ostream & stream, const Vector<T> & vec)
 template<typename T>
 struct CollectionSerializer<Vector<T> > {
 
+    typedef CollectionSerializer<T> ChildSerializer;
+
+    typedef typename ChildSerializer::WorkingMetadata ChildWorkingMetadata;
+    typedef typename ChildSerializer::ImmutableMetadata ChildImmutableMetadata;
+
+    typedef CollectionSerializer<unsigned> LengthSerializer;
+    typedef CollectionSerializer<ChildImmutableMetadata> ChildMetadataSerializer;
+
     struct WorkingMetadata {
+        WorkingMetadata(size_t length)
+            : offsets(length), lengths(length), metadata(length)
+        {
+        }
+
         vector<size_t> offsets;
         vector<size_t> lengths;
-        vector<CollectionSerializer<T> > serializers;
-    };
+        vector<ChildWorkingMetadata> metadata;
 
+        // how many words in the various entries start
+        size_t length_offset, metadata_offset, data_offset;
+
+        typename LengthSerializer::WorkingMetadata offsets_metadata;
+        typename LengthSerializer::WorkingMetadata lengths_metadata;
+        typename ChildMetadataSerializer::WorkingMetadata metadata_metadata;
+    };
+    
     struct ImmutableMetadata {
-        Vector<unsigned> sizes;
         Vector<unsigned> offsets;
-        Vector<CollectionSerializer<T> > metadata;
+        Vector<unsigned> lengths;
+        Vector<typename ChildSerializer::ImmutableMetadata> metadata;
     };
 
-    typedef VectorMetadata metadata;
-
-    Bits bits_per_entry() const { return Base::metadata_width(metadata); }
+    static WorkingMetadata new_metadata(size_t length)
+    {
+        WorkingMetadata result(length);
+        return result;
+    }
 
     // Prepare to serialize.  We mostly work out the size of the metadata
     // here.
     template<typename Iterator>
-    size_t prepare(Iterator first, Iterator last)
+    static size_t prepare(Iterator first, Iterator last, WorkingMetadata & md)
     {
         size_t length = last - first;
         
         // Serialize each of the sub-arrays, taking the absolute offset
         // of each one
-        vector<size_t> offsets(length);
-        vector<size_t> lengths(length);
-        vector<CollectionSerializer<T> > serializers(length);
-
         size_t total_words = 0;
 
         for (int i = 0; first != last;  ++first, ++i) {
             const typename std::iterator_traits<Iterator>::reference val
                 = *first;
-            lengths[i] = val.size();
-            CollectionSerializer<T> & serializer = serializers[i];
+            md.lengths[i] = val.size();
+            typename ChildSerializer::WorkingMetadata & wmd
+                = md.metadata[i];
 
-            size_t nwords = serializer.prepare(val.begin(), val.end());
-
-            offsets[i] = total_words;
+            wmd = ChildSerializer::new_metadata(val.size());
+            size_t nwords = ChildSerializer::prepare(val.begin(), val.end(),
+                                                     wmd);
+            
+            md.offsets[i] = total_words;
             total_words += nwords;
         }
 
-        // Add to that the words necessary to serialize:
-        // - the array of sizes
-        // - the array of offsets
-        // - the array of metadata
+        // Add to that the words necessary to serialize the metadata arrays
+        // for the children
+
+        md.offsets_metadata = LengthSerializer::new_metadata(length);
+        size_t offset_words = LengthSerializer::prepare(md.offsets.begin(),
+                                                        md.offsets.end(),
+                                                        md.offsets_metadata);
+
+        md.lengths_metadata = LengthSerializer::new_metadata(length);
+        size_t length_words = LengthSerializer::prepare(md.lengths.begin(),
+                                                        md.lengths.end(),
+                                                        md.lengths_metadata);
+
+        md.metadata_metadata = ChildMetadataSerializer::new_metadata(length);
+        size_t metadata_words
+            = ChildMetadataSerializer
+            ::prepare(md.metadata.begin(),
+                      md.metadata.end(),
+                      md.metadata_metadata);
+
+        md.length_offset = offset_words;
+        md.metadata_offset = offset_words + length_words;
+        md.data_offset = md.metadata_offset + metadata_words;
+
+        total_words += md.data_offset;
 
         return total_words;
     }
 
     // Extract entry n out of the total
-    Vector<T> extract(const long * mem, int n) const
+    static Vector<T> extract(const long * mem, int n,
+                             const ImmutableMetadata & metadata)
     {
         throw Exception("extract for vector: not done");
 
         // Get the offset and the length
         size_t offset = 0;
         size_t length = 0;
-        CollectionSerializer<T> serializer;
+        typename ChildMetadataSerializer::ImmutableMetadata metadata;
         
-        Vector<T> result(length, mem + offset, serializer);
+        Vector<T> result(length, mem + offset, metadata);
         return result;
     }
 
     // Serialize a homogeneous collection where each of the elements is a
     // vector<T>.  We don't serialize any details of the collection itself.
     template<typename Iterator>
-    void serialize_collection(BitWriter & writer,
-                              Iterator first, Iterator last)
+    ImmutableMetadata
+    serialize_collection(BitWriter & writer,
+                         Iterator first, Iterator last, WorkingMetadata & md)
     {
-        for (int i = 0; first != last;  ++first, ++i)
-            Base::serialize(writer, *first, metadata, i);
+        throw Exception("vector serialize_collection not done");
     }
 };
 
