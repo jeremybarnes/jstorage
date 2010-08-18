@@ -353,6 +353,66 @@ struct Vector {
         return serializer_.extract(mem_, index);
     }
 
+
+    struct const_iterator
+        : public boost::iterator_facade<const_iterator,
+                                        const T,
+                                        boost::random_access_traversal_tag,
+                                        const T> {
+    private:
+        const_iterator(Vector vec, size_t element)
+            : vec(vec), element(element)
+        {
+        }
+
+        Vector vec;
+        ssize_t element;
+
+        friend class boost::iterator_core_access;
+        friend class Vector;
+
+        T dereference() const
+        {
+            if (element < 0 || element >= vec.size())
+                throw Exception("invalid vector dereference attempt");
+            return vec[element];
+        }
+
+        bool equal(const const_iterator & other) const
+        {
+            return other.element == element;
+        }
+        
+        void increment()
+        {
+            element += 1;
+        }
+
+        void decrement()
+        {
+            element -= 1;
+        }
+
+        void advance(ssize_t n)
+        {
+            element += n;
+        }
+
+        ssize_t distance_to(const const_iterator & other) const
+        {
+            return other.element - element;
+        }
+    };
+
+    const_iterator begin() const
+    {
+        return const_iterator(*this, 0);
+    }
+
+    const_iterator end() const
+    {
+        return const_iterator(*this, length_);
+    }
 };
 
 template<typename T>
@@ -504,7 +564,12 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
 }
 
 template<typename T1, typename T2>
-bool operator == (const Vector<T1> & v1, const std::vector<T2> & v2);
+bool operator == (const Vector<T1> & v1, const std::vector<T2> & v2)
+{
+    if (v1.size() != v2.size())
+        return false;
+    return std::equal(v1.begin(), v1.end(), v2.begin());
+}
 
 template<typename T1, typename T2>
 bool operator == (const std::vector<T1> & v1, const Vector<T2> & v2)
