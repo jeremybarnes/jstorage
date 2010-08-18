@@ -113,6 +113,12 @@ struct MemoryManager {
         return std::make_pair(result, wasted);
     }
 
+    static size_t words_required(Bits bits, size_t length)
+    {
+        Bits nbits = bits * length;
+        return words_to_cover(nbits).first;
+    }
+
     long * allocate(size_t nwords)
     {
         return new long[nwords];
@@ -190,16 +196,14 @@ struct CollectionSerializer {
     // Scan a series of entries to figure out how to efficiently serialize
     // them.
     template<typename Iterator>
-    long * prepare(MemoryManager & mm, Iterator first, Iterator last)
+    size_t prepare(Iterator first, Iterator last)
     {
         int length = last - first;
 
         for (int i = 0; first != last;  ++first, ++i)
             Base::prepare(*first, metadata, i);
 
-        long * mem = mm.allocate(bits_per_entry(), length);
-
-        return mem;
+        return MemoryManager::words_required(bits_per_entry(), length);
     }
 
     // Extract entry n out of the total
@@ -218,6 +222,11 @@ struct CollectionSerializer {
         for (int i = 0; first != last;  ++first, ++i)
             Base::serialize(writer, *first, metadata, i);
     }
+
+    size_t words_required(size_t length)
+    {
+        return MemoryManager::words_required(bits_per_entry(), length);
+    }
 };
 
 template<> struct Serializer<Bits>;
@@ -227,6 +236,53 @@ struct Serializer<unsigned> {
 
     // The thing that we're reading
     typedef unsigned Value;
+
+    // The metadata about a collection of unsigned is just the width in bits
+    // of the widest entry.  The maximum value is therefore 32 on most
+    // platforms in existence today.
+    typedef Bits Metadata;
+
+    // Object to serialize metadata
+    typedef Serializer<Bits> MetadataSerializer;
+
+    // Object to serialize a collection of metadatas
+    typedef CollectionSerializer<Bits> MetadataCollectionSerializer;
+
+    // Serialize a single unsigned value, given metadata
+    template<typename ValueT>
+    static void serialize(BitWriter & writer, const ValueT & value,
+                          Metadata metadata, int object_num)
+    {
+        unsigned uvalue = value;
+        writer.write(uvalue, metadata);
+    }
+
+    // Reconstitute a single object, given metadata
+    static Value reconstitute(BitReader & reader, Metadata metadata)
+    {
+        return reader.read(metadata);
+    }
+
+    // How many bits do we need to implement the metadata?
+    static Bits metadata_width(Metadata metadata)
+    {
+        return metadata;
+    }
+
+    // Scan a single item, updating the metadata
+    static void prepare(Value value, Metadata & metadata, int item_number)
+    {
+        metadata.value()
+            = std::max<size_t>(metadata.value(), highest_bit(value, -1) + 1);
+    }
+};
+
+#if 0
+template<typename T>
+struct Serializer<CollectionSerializer<T> > {
+
+    // The thing that we're reading
+    typedef CollectionSerializer<T> Value;
 
     // The metadata about a collection of unsigned is just the width in bits
     // of the widest entry.  The maximum value is therefore 32 on most
@@ -265,33 +321,42 @@ struct Serializer<unsigned> {
             = std::max<size_t>(metadata.value(), highest_bit(value, -1) + 1);
     }
 };
+#endif
 
 template<typename T, typename MM = MemoryManager>
 struct Array {
     Array()
-        : mm_(0), length_(0), offset_(0)
+        : length_(0), mem_(0)
     {
     }
 
+    // Create and populate with data from a range
     template<typename Iterator>
     Array(MM & mm, Iterator first, Iterator last)
-        : mm_(&mm),
-          length_(last - first)
+        : length_(last - first)
     {
-        long * mem = serializer_.prepare(mm, first, last);
+        size_t nwords = serializer_.prepare(first, last);
+        long * mem = mm.allocate(nwords);
+        mem_ = mem;
+
         BitWriter writer(mem);
         serializer_.serialize_collection(writer, first, last);
-        offset_ = mm_->encode(mem);
     }
 
-    MM * mm_;
+    // Create, using memory populated from elsewhere
+    Array(size_t length, const long * mem,
+          const CollectionSerializer<T> & serializer)
+        : length_(length), serializer_(serializer), mem_(mem)
+    {
+    }
+
     size_t length_;
     CollectionSerializer<T> serializer_;
-    size_t offset_;
+    const long * mem_;
 
     T extract(int element) const
     {
-        return serializer_.extract(mm_->resolve(offset_), element);
+        return serializer_.extract(mem_, element);
     }
 };
 
@@ -302,6 +367,12 @@ struct Vector {
     Metadata array_;
 
     Vector()
+    {
+    }
+
+    Vector(size_t length, const long * mem,
+           const CollectionSerializer<T> & serializer)
+        : array_(length, mem, serializer)
     {
     }
 
@@ -369,11 +440,13 @@ struct Serializer<Vector<T> > {
     }
 
     // Serialize a single vector object
+    template<typename ValueT>
     static void serialize(BitWriter & writer,
-                          const Value & value,
+                          const ValueT & value,
                           const Metadata & metadata,
                           int object_num)
     {
+        throw Exception("serialize(): not done");
         // The sub-items are already done, so there's nothing left to do.
     }
 
@@ -402,7 +475,7 @@ struct CollectionSerializer<Vector<T> > {
     // Prepare to serialize.  We mostly work out the size of the metadata
     // here.
     template<typename Iterator>
-    long * prepare(MemoryManager & mm, Iterator first, Iterator last)
+    size_t prepare(Iterator first, Iterator last)
     {
         size_t length = last - first;
         
@@ -415,27 +488,30 @@ struct CollectionSerializer<Vector<T> > {
         size_t total_words = 0;
 
         for (int i = 0; first != last;  ++first, ++i) {
-            typename std::iterator_traits<Iterator>::const_reference val
+            const typename std::iterator_traits<Iterator>::reference val
                 = *first;
             lengths[i] = val.size();
             CollectionSerializer<T> & serializer = serializers[i];
 
-            serializer.prepare(val.begin(), val.end());
-            size_t nwords = serializer.words_required();
+            size_t nwords = serializer.prepare(val.begin(), val.end());
 
             offsets[i] = total_words;
-            total_words += serializer.words_required();
+            total_words += nwords;
         }
 
-        long * mem = mm.allocate(total_words);
-        return mem;
+        return total_words;
     }
 
     // Extract entry n out of the total
-    unsigned extract(const long * mem, int n) const
+    Vector<T> extract(const long * mem, int n) const
     {
-        BitReader reader(mem, n * metadata);
-        return reader.read(metadata);
+        // Get the offset and the length
+        size_t offset = 0;
+        size_t length = 0;
+        CollectionSerializer<T> serializer;
+        
+        Vector<T> result(length, mem + offset, serializer);
+        return result;
     }
 
     // Serialize a homogeneous collection where each of the elements is an
@@ -445,7 +521,7 @@ struct CollectionSerializer<Vector<T> > {
                               Iterator first, Iterator last)
     {
         for (int i = 0; first != last;  ++first, ++i)
-            Base::serialize(writer, *first, metadata);
+            Base::serialize(writer, *first, metadata, i);
     }
 };
 
