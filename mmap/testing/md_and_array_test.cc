@@ -185,10 +185,10 @@ struct CollectionSerializer {
     // Scan a series of entries to figure out how to efficiently serialize
     // them.
     template<typename Iterator>
-    void scan(Iterator first, Iterator last)
+    void prepare(Iterator first, Iterator last)
     {
         for (; first != last;  ++first)
-            Base::scan(*first, width);
+            Base::prepare(*first, width);
     }
 
     // Extract entry n out of the total
@@ -204,10 +204,8 @@ struct CollectionSerializer {
     void serialize_collection(BitWriter & writer,
                               Iterator first, Iterator last)
     {
-        for (; first != last;  ++first) {
-            unsigned val = *first;
-            writer.write(val, bits());
-        }
+        for (int i = 0; first != last;  ++first, ++i)
+            Base::serialize(writer, *first, width, i);
     }
 };
 
@@ -215,15 +213,6 @@ template<> struct Serializer<Bits>;
 
 template<>
 struct Serializer<unsigned> {
-    template<typename Iterator>
-    Serializer(Iterator first, Iterator last)
-    {
-        // No scanning to do
-    }
-
-    Serializer()
-    {
-    }
 
     // The thing that we're reading
     typedef unsigned Value;
@@ -239,7 +228,8 @@ struct Serializer<unsigned> {
     typedef CollectionSerializer<Bits> WidthCollectionSerializer;
 
     // Serialize a single object, given a width
-    static void serialize(BitWriter & writer, Value value, Width width)
+    static void serialize(BitWriter & writer, Value value, Width width,
+                          int n)
     {
         writer.write(value, width);
     }
@@ -257,7 +247,7 @@ struct Serializer<unsigned> {
     }
 
     // Scan a single item, updating the width
-    static void scan(Value value, Width & width)
+    static void prepare(Value value, Width & width)
     {
         width.value()
             = std::max<size_t>(width.value(), highest_bit(value, -1) + 1);
@@ -276,7 +266,7 @@ struct Array {
         : mm_(&mm),
           length_(last - first)
     {
-        serializer_.scan(first, last);
+        serializer_.prepare(first, last);
         long * mem = mm_->allocate(serializer_.bits(), length_);
         offset_ = mm_->encode(mem);
         BitWriter writer(mem);
@@ -333,54 +323,67 @@ std::ostream & operator << (std::ostream & stream, const Vector<T> & vec)
 }
 
 #if 0
+
+template<typename T>
+struct VectorMetadata {
+    Vector<size_t> sizes;
+    Vector<size_t> offsets;
+    Vector<CollectionSerializer<T> > metadata;
+};
+
 template<typename T>
 struct Serializer<Vector<T> > {
 
-    template<typename Iterator>
-    Serializer(Iterator first, Iterator last)
+    // The thing that we're reading
+    typedef Vector<T> Value;
+
+    // The type of something that holds the metadata about a collection of
+    // vectors.  The information that needs to be held is:
+    // - A list containing the length of each element;
+    // - A list containing the pointer offset of each element;
+    // - A list containing the sizing information necessary for the elements
+    //   in that list
+
+    typedef VectorMetadata<T> Width;
+
+    // Object to serialize a width
+    typedef Serializer<Width> WidthSerializer;
+
+    // Object to serialize a collection of widths
+    typedef CollectionSerializer<Width> WidthCollectionSerializer;
+
+    // Serialize a single object, given a width
+    static void serialize(BitWriter & writer,
+                          const Value & value,
+                          const Width & width)
     {
-        // No scanning to do
+        // The metadata, etc is already done.  All we need to do is get the
+        // collection serializer and offset, and use that.
+        CollectionSerializer<T> cs = width.metadata[
     }
 
-    Serializer()
+    // Reconstitute a single object, given a width
+    static Value reconstitute(BitReader & reader, Width width)
     {
+        return reader.read(width);
     }
 
-    size_t length;
-    size_t offset;
-
-    Bits bits() const { return Bits(0); }
-
-    Vector<T> extract(const long * mem, int n) const
+    // How many bits do we need to implement the width?
+    static Bits width_to_bits(Width width)
     {
-        const Metadata * p = reinterpret_cast<const Metadata *>(mem);
-        return p[n];
+        return width;
     }
 
-    // Serialize a homogeneous collection, each element of which is a
-    // Vector<T>.
-    template<typename Iterator>
-    void serialize_collection(BitWriter & writer,
-                              Iterator first, Iterator last)
+    // Scan a single item, updating the width
+    static void prepare(Value value, Width & width)
     {
-        // We're serializing a vector of vectors; each element of the
-        // iterator is a Vector<T>.
-        // 1.  Size each of the sub-collections individually
-        // 2.  Serialize the sub-collections to get the offsets and
-        //     lengths.
-        // 3.  Serialize the objects themselves
-
-        size_t n = last - first;
-        vector<Serializer<T> > serializers;
-
-        Serializer<T> serializer;
-        for (; first != last;  ++first) {
-            T to_write = *first;
-            serializer.serialize(T);
-        }
+        width.value()
+            = std::max<size_t>(width.value(), highest_bit(value, -1) + 1);
     }
 };
+
 #endif
+
 
 // Two cases:
 // 1.  Root case: the metadata object is actually present
