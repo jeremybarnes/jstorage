@@ -204,7 +204,7 @@ struct CollectionSerializer {
     // Serialize a homogeneous collection where each of the elements is an
     // unsigned.  We don't serialize any details of the collection itself.
     template<typename Iterator>
-    void serialize_collection(BitWriter & writer,
+    static void serialize_collection(BitWriter & writer,
                               Iterator first, Iterator last)
     {
         for (int i = 0; first != last;  ++first, ++i)
@@ -371,6 +371,63 @@ struct CollectionSerializer<unsigned> {
 };
 
 
+template<>
+struct CollectionSerializer<Bits> {
+    // Metadata type for when we're working (needs to be mutable)
+    typedef Bits WorkingMetadata;
+
+    // Metadata type for when we're accessing (not mutable)
+    typedef Bits ImmutableMetadata;
+
+    static WorkingMetadata new_metadata(size_t length)
+    {
+        return Bits();
+    }
+
+    // Scan a series of entries to figure out how to efficiently serialize
+    // them.
+    template<typename Iterator>
+    static size_t prepare(Iterator first, Iterator last, WorkingMetadata & md)
+    {
+        int length = last - first;
+
+        for (int i = 0; first != last;  ++first, ++i) {
+            Bits uvalue = *first;
+            md.value() = std::max<size_t>(md.value(),
+                                          highest_bit(uvalue.value(), -1) + 1);
+        }
+
+        return MemoryManager::words_required(md, length);
+    }
+
+    // Extract entry n out of the total
+    static Bits extract(const long * mem, int n,
+                        ImmutableMetadata md)
+    {
+        BitReader reader(mem, n * md);
+        return Bits(reader.read(md));
+    }
+
+    // Serialize a homogeneous collection where each of the elements is an
+    // unsigned.  We don't serialize any details of the collection itself.
+    // Returns an immutable metadata object that can be later used to access
+    // the elements.
+    template<typename Iterator>
+    static ImmutableMetadata
+    serialize_collection(BitWriter & writer,
+                         Iterator first, Iterator last,
+                         const WorkingMetadata & md)
+    {
+        for (int i = 0; first != last;  ++first, ++i) {
+            Bits uvalue = *first;
+            writer.write(uvalue.value(), md);
+        }
+
+        return md;
+    }
+};
+
+
 /*****************************************************************************/
 /* VECTOR                                                                    */
 /*****************************************************************************/
@@ -391,7 +448,7 @@ struct Vector {
 
     Vector(size_t length, const long * mem,
            const Metadata & metadata)
-        : length_(length), metadata_(metadata), metadata_(metadata)
+        : length_(length), metadata_(metadata), mem_(mem)
     {
     }
 
@@ -604,16 +661,16 @@ struct CollectionSerializer<Vector<T> > {
         // Get the offset and the length
         size_t offset = 0;
         size_t length = 0;
-        typename ChildMetadataSerializer::ImmutableMetadata metadata;
+        ChildImmutableMetadata child_metadata;
         
-        Vector<T> result(length, mem + offset, metadata);
+        Vector<T> result(length, mem + offset, child_metadata);
         return result;
     }
 
     // Serialize a homogeneous collection where each of the elements is a
     // vector<T>.  We don't serialize any details of the collection itself.
     template<typename Iterator>
-    ImmutableMetadata
+    static ImmutableMetadata
     serialize_collection(BitWriter & writer,
                          Iterator first, Iterator last, WorkingMetadata & md)
     {
