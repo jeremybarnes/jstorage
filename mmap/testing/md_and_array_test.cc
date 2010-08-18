@@ -353,7 +353,6 @@ struct Vector {
         return serializer_.extract(mem_, index);
     }
 
-
     struct const_iterator
         : public boost::iterator_facade<const_iterator,
                                         const T,
@@ -520,6 +519,8 @@ struct CollectionSerializer<Vector<T> > {
     // Extract entry n out of the total
     Vector<T> extract(const long * mem, int n) const
     {
+        throw Exception("extract for vector: not done");
+
         // Get the offset and the length
         size_t offset = 0;
         size_t length = 0;
