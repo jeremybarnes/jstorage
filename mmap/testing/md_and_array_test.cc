@@ -468,8 +468,6 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
-#if 0
-
 template<typename T1, typename T2>
 bool operator == (const Vector<T1> & v1, const std::vector<T2> & v2);
 
@@ -502,5 +500,3 @@ BOOST_AUTO_TEST_CASE(test_nested1)
     BOOST_CHECK_EQUAL(v1[2], values[2]);
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
-
-#endif
