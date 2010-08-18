@@ -39,29 +39,6 @@ using namespace std;
 using namespace ML;
 
 
-#if 0
-// Metadata
-// has the following capabilities:
-// - length: return the number of elements
-// - data:   returns the amount of data
-
-template<typename MetadataT, typename PayloadT>
-struct MDAndArray : public MetadataT {
-    using MetadataT::data;
-    using MetadataT::length;
-
-    MDAndArray(const MetadataT & md)
-        : md(md)
-    {
-    }
-
-    PayloadT operator [] (int index) const
-    {
-        return Extractor<Payload>::extract(data(), index);
-    }
-};
-#endif
-
 /** Small class to hold a count of bits so that length and number of bits
     parameters don't get confused */
 struct Bits {
@@ -323,16 +300,33 @@ struct Serializer<CollectionSerializer<T> > {
 };
 #endif
 
-template<typename T, typename MM = MemoryManager>
-struct Array {
-    Array()
+template<typename T>
+struct Vector {
+
+    size_t length_;
+    CollectionSerializer<T> serializer_;
+    const long * mem_;
+
+    Vector()
         : length_(0), mem_(0)
+    {
+    }
+
+    Vector(size_t length, const long * mem,
+           const CollectionSerializer<T> & serializer)
+        : length_(length), serializer_(serializer), mem_(mem)
     {
     }
 
     // Create and populate with data from a range
     template<typename Iterator>
-    Array(MM & mm, Iterator first, Iterator last)
+    Vector(MemoryManager & mm, const std::vector<T2> & vec)
+    {
+        init(vec.begin(), vec.end());
+    }
+
+    template<typename Iterator>
+    void init(MemoryManager & mm, Iterator first, Iterator last)
         : length_(last - first)
     {
         size_t nwords = serializer_.prepare(first, last);
@@ -343,53 +337,14 @@ struct Array {
         serializer_.serialize_collection(writer, first, last);
     }
 
-    // Create, using memory populated from elsewhere
-    Array(size_t length, const long * mem,
-          const CollectionSerializer<T> & serializer)
-        : length_(length), serializer_(serializer), mem_(mem)
-    {
-    }
-
-    size_t length_;
-    CollectionSerializer<T> serializer_;
-    const long * mem_;
-
-    T extract(int element) const
-    {
-        return serializer_.extract(mem_, element);
-    }
-};
-
-template<typename T>
-struct Vector {
-    typedef Array<T> Metadata;
-
-    Metadata array_;
-
-    Vector()
-    {
-    }
-
-    Vector(size_t length, const long * mem,
-           const CollectionSerializer<T> & serializer)
-        : array_(length, mem, serializer)
-    {
-    }
-
-    template<typename T2>
-    Vector(MemoryManager & mm, const std::vector<T2> & vec)
-        : array_(mm, vec.begin(), vec.end())
-    {
-    }
-
     size_t size() const
     {
-        return array_.length_;
+        return length_;
     }
     
     T operator [] (int index) const
     {
-        return array_.extract(index);
+        return serializer_.extract(mem_, index);
     }
 
 };
