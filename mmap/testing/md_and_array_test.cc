@@ -319,16 +319,16 @@ struct Vector {
     }
 
     // Create and populate with data from a range
-    template<typename Iterator>
+    template<typename T2>
     Vector(MemoryManager & mm, const std::vector<T2> & vec)
     {
-        init(vec.begin(), vec.end());
+        init(mm, vec.begin(), vec.end());
     }
 
     template<typename Iterator>
     void init(MemoryManager & mm, Iterator first, Iterator last)
-        : length_(last - first)
     {
+        length_ = last - first;
         size_t nwords = serializer_.prepare(first, last);
         long * mem = mm.allocate(nwords);
         mem_ = mem;
