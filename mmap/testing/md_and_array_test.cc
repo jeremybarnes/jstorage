@@ -169,15 +169,17 @@ struct BitReader {
 /* SERIALIZERS AND COLLECTIONSERIALIZERS                                     */
 /*****************************************************************************/
 
-template<typename T> struct Serializer;
+template<typename T> struct CollectionSerializer;
 
+#if 0
 template<typename T>
 struct CollectionSerializer {
     typedef Serializer<T> Base;
 
-    typename Base::Metadata metadata;
+    typedef Base::WorkingMetadata WorkingMetadata;
+    typedef Base::ImmutableMetadata ImmutableMetadata;
 
-    Bits bits_per_entry() const { return Base::metadata_width(metadata); }
+    static Bits bits_per_entry() const { return Base::metadata_width(metadata); }
 
     // Scan a series of entries to figure out how to efficiently serialize
     // them.
@@ -214,6 +216,9 @@ struct CollectionSerializer {
         return MemoryManager::words_required(bits_per_entry(), length);
     }
 };
+#endif
+
+#if 0
 
 template<typename T>
 struct Serializer<CollectionSerializer<T> > {
@@ -261,6 +266,12 @@ struct Serializer<CollectionSerializer<T> > {
     }
 };
 
+#endif
+
+#if 0
+
+template<typename T> struct Serializer;
+
 template<>
 struct Serializer<unsigned> {
 
@@ -301,6 +312,64 @@ struct Serializer<unsigned> {
     }
 };
 
+#endif
+
+template<>
+struct CollectionSerializer<unsigned> {
+    // Metadata type for when we're working (needs to be mutable)
+    typedef Bits WorkingMetadata;
+
+    // Metadata type for when we're accessing (not mutable)
+    typedef Bits ImmutableMetadata;
+
+    static WorkingMetadata new_metadata(size_t length)
+    {
+        return Bits();
+    }
+
+    // Scan a series of entries to figure out how to efficiently serialize
+    // them.
+    template<typename Iterator>
+    static size_t prepare(Iterator first, Iterator last, WorkingMetadata & md)
+    {
+        int length = last - first;
+
+        for (int i = 0; first != last;  ++first, ++i) {
+            unsigned uvalue = *first;
+            md.value() = std::max<size_t>(md.value(),
+                                          highest_bit(uvalue, -1) + 1);
+        }
+
+        return MemoryManager::words_required(md, length);
+    }
+
+    // Extract entry n out of the total
+    static unsigned extract(const long * mem, int n,
+                            ImmutableMetadata md)
+    {
+        BitReader reader(mem, n * md);
+        return reader.read(md);
+    }
+
+    // Serialize a homogeneous collection where each of the elements is an
+    // unsigned.  We don't serialize any details of the collection itself.
+    // Returns an immutable metadata object that can be later used to access
+    // the elements.
+    template<typename Iterator>
+    static ImmutableMetadata
+    serialize_collection(BitWriter & writer,
+                         Iterator first, Iterator last,
+                         const WorkingMetadata & md)
+    {
+        for (int i = 0; first != last;  ++first, ++i) {
+            unsigned uvalue = *first;
+            writer.write(uvalue, md);
+        }
+
+        return md;
+    }
+};
+
 
 /*****************************************************************************/
 /* VECTOR                                                                    */
@@ -310,7 +379,9 @@ template<typename T>
 struct Vector {
 
     size_t length_;
-    CollectionSerializer<T> serializer_;
+    typedef CollectionSerializer<T> Serializer;
+    typedef typename Serializer::ImmutableMetadata Metadata;
+    Metadata metadata_;
     const long * mem_;
 
     Vector()
@@ -319,8 +390,8 @@ struct Vector {
     }
 
     Vector(size_t length, const long * mem,
-           const CollectionSerializer<T> & serializer)
-        : length_(length), serializer_(serializer), mem_(mem)
+           const Metadata & metadata)
+        : length_(length), metadata_(metadata), metadata_(metadata)
     {
     }
 
@@ -335,12 +406,16 @@ struct Vector {
     void init(MemoryManager & mm, Iterator first, Iterator last)
     {
         length_ = last - first;
-        size_t nwords = serializer_.prepare(first, last);
+        typename Serializer::WorkingMetadata metadata
+            = Serializer::new_metadata(length_);
+
+        size_t nwords = Serializer::prepare(first, last, metadata);
         long * mem = mm.allocate(nwords);
         mem_ = mem;
 
         BitWriter writer(mem);
-        serializer_.serialize_collection(writer, first, last);
+        metadata_
+            = Serializer::serialize_collection(writer, first, last, metadata);
     }
 
     size_t size() const
@@ -350,7 +425,7 @@ struct Vector {
     
     T operator [] (int index) const
     {
-        return serializer_.extract(mem_, index);
+        return Serializer::extract(mem_, index, metadata_);
     }
 
     struct const_iterator
@@ -425,64 +500,21 @@ std::ostream & operator << (std::ostream & stream, const Vector<T> & vec)
 }
 
 template<typename T>
-struct VectorMetadata {
-    Vector<unsigned> sizes;
-    Vector<unsigned> offsets;
-    Vector<CollectionSerializer<T> > metadata;
-};
-
-template<typename T>
-struct Serializer<Vector<T> > {
-
-    // The thing that we're reading
-    typedef Vector<T> Value;
-
-    // The type of something that holds the metadata about a collection of
-    // vectors.  The information that needs to be held is:
-    // - A list containing the length of each element;
-    // - A list containing the pointer offset of each element;
-    // - A list containing the sizing information necessary for the elements
-    //   in that list
-
-    typedef VectorMetadata<T> Metadata;
-
-    // Prepare a single item for serialization, updating the metadata
-    static void prepare(Value value, Metadata & metadata, int item_number)
-    {
-        metadata.value()
-            = std::max<size_t>(metadata.value(), highest_bit(value, -1) + 1);
-    }
-
-    // Serialize a single vector object
-    template<typename ValueT>
-    static void serialize(BitWriter & writer,
-                          const ValueT & value,
-                          const Metadata & metadata,
-                          int object_num)
-    {
-        throw Exception("serialize(): not done");
-        // The sub-items are already done, so there's nothing left to do.
-    }
-
-    // Reconstitute a single object, given metadata
-    static Value reconstitute(BitReader & reader, Metadata metadata)
-    {
-        return reader.read(metadata);
-    }
-
-    // How many bits do we need to implement the metadata?
-    static Bits metadata_width(Metadata metadata)
-    {
-        return metadata;
-    }
-
-};
-
-template<typename T>
 struct CollectionSerializer<Vector<T> > {
-    typedef Serializer<Vector<T> > Base;
 
-    typename Base::Metadata metadata;
+    struct WorkingMetadata {
+        vector<size_t> offsets;
+        vector<size_t> lengths;
+        vector<CollectionSerializer<T> > serializers;
+    };
+
+    struct ImmutableMetadata {
+        Vector<unsigned> sizes;
+        Vector<unsigned> offsets;
+        Vector<CollectionSerializer<T> > metadata;
+    };
+
+    typedef VectorMetadata metadata;
 
     Bits bits_per_entry() const { return Base::metadata_width(metadata); }
 
@@ -513,6 +545,11 @@ struct CollectionSerializer<Vector<T> > {
             total_words += nwords;
         }
 
+        // Add to that the words necessary to serialize:
+        // - the array of sizes
+        // - the array of offsets
+        // - the array of metadata
+
         return total_words;
     }
 
@@ -530,8 +567,8 @@ struct CollectionSerializer<Vector<T> > {
         return result;
     }
 
-    // Serialize a homogeneous collection where each of the elements is an
-    // unsigned.  We don't serialize any details of the collection itself.
+    // Serialize a homogeneous collection where each of the elements is a
+    // vector<T>.  We don't serialize any details of the collection itself.
     template<typename Iterator>
     void serialize_collection(BitWriter & writer,
                               Iterator first, Iterator last)
