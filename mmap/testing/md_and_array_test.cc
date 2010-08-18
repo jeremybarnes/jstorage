@@ -204,9 +204,10 @@ struct CollectionSerializer {
     // Serialize a homogeneous collection where each of the elements is an
     // unsigned.  We don't serialize any details of the collection itself.
     template<typename Iterator>
-    static void serialize_collection(BitWriter & writer,
-                              Iterator first, Iterator last)
+    static void serialize_collection(long * mem,
+                                     Iterator first, Iterator last)
     {
+        BitWriter writer(mem);
         for (int i = 0; first != last;  ++first, ++i)
             Base::serialize(writer, *first, metadata, i);
     }
@@ -357,10 +358,11 @@ struct CollectionSerializer<unsigned> {
     // the elements.
     template<typename Iterator>
     static ImmutableMetadata
-    serialize_collection(BitWriter & writer,
+    serialize_collection(long * mem,
                          Iterator first, Iterator last,
                          const WorkingMetadata & md)
     {
+        BitWriter writer(mem);
         for (int i = 0; first != last;  ++first, ++i) {
             unsigned uvalue = *first;
             writer.write(uvalue, md);
@@ -414,10 +416,11 @@ struct CollectionSerializer<Bits> {
     // the elements.
     template<typename Iterator>
     static ImmutableMetadata
-    serialize_collection(BitWriter & writer,
+    serialize_collection(long * mem,
                          Iterator first, Iterator last,
                          const WorkingMetadata & md)
     {
+        BitWriter writer(mem);
         for (int i = 0; first != last;  ++first, ++i) {
             Bits uvalue = *first;
             writer.write(uvalue.value(), md);
@@ -470,9 +473,8 @@ struct Vector {
         long * mem = mm.allocate(nwords);
         mem_ = mem;
 
-        BitWriter writer(mem);
         metadata_
-            = Serializer::serialize_collection(writer, first, last, metadata);
+            = Serializer::serialize_collection(mem, first, last, metadata);
     }
 
     size_t size() const
@@ -671,9 +673,12 @@ struct CollectionSerializer<Vector<T> > {
     // vector<T>.  We don't serialize any details of the collection itself.
     template<typename Iterator>
     static ImmutableMetadata
-    serialize_collection(BitWriter & writer,
+    serialize_collection(long * mem,
                          Iterator first, Iterator last, WorkingMetadata & md)
     {
+        // First: the three metadata arrays
+        
+
         throw Exception("vector serialize_collection not done");
     }
 };
