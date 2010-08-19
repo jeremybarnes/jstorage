@@ -69,6 +69,11 @@ Bits operator * (Integral i, Bits b)
     return b * i;
 }
 
+std::ostream & operator << (std::ostream & stream, Bits bits)
+{
+    return stream << format("Bits(%d)", bits.value());
+}
+
 struct MemoryManager {
 
     const long * resolve(size_t offset)
@@ -649,6 +654,13 @@ struct CollectionSerializer<Vector<T> > {
         md.metadata_offset = offset_words + length_words;
         md.data_offset = md.metadata_offset + metadata_words;
 
+        cerr << "data words " << total_words
+             << " offset words " << offset_words
+             << " length words " << length_words
+             << " md words " << metadata_words
+             << " total words " << total_words + md.data_offset
+             << endl;
+
         total_words += md.data_offset;
 
         return total_words;
@@ -676,10 +688,41 @@ struct CollectionSerializer<Vector<T> > {
     serialize_collection(long * mem,
                          Iterator first, Iterator last, WorkingMetadata & md)
     {
-        // First: the three metadata arrays
+        cerr << "offsets = " << md.offsets << endl;
+        cerr << "lengths = " << md.lengths << endl;
+        cerr << "md      = " << md.metadata << endl;
         
+        // First: the three metadata arrays
+        LengthSerializer::
+            serialize_collection(mem, md.offsets.begin(), md.offsets.end(),
+                                 md.offsets_metadata);
 
-        throw Exception("vector serialize_collection not done");
+        LengthSerializer::
+            serialize_collection(mem + md.length_offset,
+                                 md.lengths.begin(), md.lengths.end(),
+                                 md.lengths_metadata);
+
+        ChildMetadataSerializer::
+            serialize_collection(mem + md.metadata_offset,
+                                 md.metadata.begin(),
+                                 md.metadata.end(),
+                                 md.metadata_metadata);
+
+        // And now the data from each of the child arrays
+        for (int i = 0; first != last;  ++first, ++i) {
+            const typename std::iterator_traits<Iterator>::reference val
+                = *first;
+            typename ChildSerializer::WorkingMetadata & wmd
+                = md.metadata[i];
+
+            wmd = ChildSerializer::
+                serialize_collection(mem + md.data_offset + md.offsets[i],
+                                     val.begin(), val.end(),
+                                     wmd);
+        }
+
+        ImmutableMetadata result;
+        return result;
     }
 };
 
@@ -728,12 +771,14 @@ BOOST_AUTO_TEST_CASE(test_nested1)
     vector<unsigned> values2 = boost::assign::list_of<int>(5)(6);
     vector<unsigned> values3;
     vector<unsigned> values4 = boost::assign::list_of<int>(7)(8)(9)(10)(11);
+    vector<unsigned> values5 = boost::assign::list_of<int>(0)(0)(0)(0)(0);
 
     vector<vector<unsigned> > values;
     values.push_back(values1);
     values.push_back(values2);
     values.push_back(values3);
     values.push_back(values4);
+    values.push_back(values5);
 
     Vector<Vector<unsigned> > v1(mm, values);
 
@@ -742,4 +787,5 @@ BOOST_AUTO_TEST_CASE(test_nested1)
     BOOST_CHECK_EQUAL(v1[1], values[1]);
     BOOST_CHECK_EQUAL(v1[2], values[2]);
     BOOST_CHECK_EQUAL(v1[3], values[3]);
+    BOOST_CHECK_EQUAL(v1[4], values[4]);
 }
