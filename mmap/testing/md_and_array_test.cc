@@ -172,7 +172,7 @@ struct Vector {
         typename Serializer::WorkingMetadata metadata
             = Serializer::new_metadata(length_);
 
-        size_t nwords = Serializer::prepare(first, last, metadata);
+        size_t nwords = Serializer::prepare_collection(first, last, metadata);
         long * mem = mm.allocate(nwords);
         mem_ = mem;
 
@@ -187,7 +187,7 @@ struct Vector {
 
     T operator [] (int index) const
     {
-        return Serializer::extract(mem_, index, metadata_);
+        return Serializer::extract_from_collection(mem_, index, metadata_);
     }
 
     struct const_iterator
