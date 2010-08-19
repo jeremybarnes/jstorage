@@ -456,8 +456,8 @@ struct Vector {
 
     Vector(size_t length, const long * mem,
            const Metadata & metadata)
-        : length_(length), metadata_(metadata), mem_(mem)
     {
+        init(length, mem, metadata);
     }
 
     // Create and populate with data from a range
@@ -465,6 +465,14 @@ struct Vector {
     Vector(MemoryManager & mm, const std::vector<T2> & vec)
     {
         init(mm, vec.begin(), vec.end());
+    }
+
+    void init(size_t length, const long * mem,
+              const Metadata & metadata)
+    {
+        length_ = length;
+        mem_ = mem;
+        metadata_ = metadata;
     }
 
     template<typename Iterator>
@@ -596,6 +604,8 @@ struct CollectionSerializer<Vector<T> > {
         Vector<unsigned> offsets;
         Vector<unsigned> lengths;
         Vector<typename ChildSerializer::ImmutableMetadata> metadata;
+        unsigned data_offset;
+        unsigned length() const { return offsets.size(); }
     };
 
     static WorkingMetadata new_metadata(size_t length)
@@ -666,21 +676,6 @@ struct CollectionSerializer<Vector<T> > {
         return total_words;
     }
 
-    // Extract entry n out of the total
-    static Vector<T> extract(const long * mem, int n,
-                             const ImmutableMetadata & metadata)
-    {
-        throw Exception("extract for vector: not done");
-
-        // Get the offset and the length
-        size_t offset = 0;
-        size_t length = 0;
-        ChildImmutableMetadata child_metadata;
-        
-        Vector<T> result(length, mem + offset, child_metadata);
-        return result;
-    }
-
     // Serialize a homogeneous collection where each of the elements is a
     // vector<T>.  We don't serialize any details of the collection itself.
     template<typename Iterator>
@@ -691,37 +686,67 @@ struct CollectionSerializer<Vector<T> > {
         cerr << "offsets = " << md.offsets << endl;
         cerr << "lengths = " << md.lengths << endl;
         cerr << "md      = " << md.metadata << endl;
+
+        int length = md.offsets.size();
+
+        ImmutableMetadata result;
+        result.data_offset = md.data_offset;
         
         // First: the three metadata arrays
-        LengthSerializer::
-            serialize_collection(mem, md.offsets.begin(), md.offsets.end(),
-                                 md.offsets_metadata);
+        result.offsets.init(length, mem,
+                            LengthSerializer::
+                            serialize_collection(mem,
+                                                 md.offsets.begin(),
+                                                 md.offsets.end(),
+                                                 md.offsets_metadata));
+        
+        result.lengths.init(length, mem + md.length_offset,
+                            LengthSerializer::
+                            serialize_collection(mem + md.length_offset,
+                                                 md.lengths.begin(),
+                                                 md.lengths.end(),
+                                                 md.lengths_metadata));
 
-        LengthSerializer::
-            serialize_collection(mem + md.length_offset,
-                                 md.lengths.begin(), md.lengths.end(),
-                                 md.lengths_metadata);
-
-        ChildMetadataSerializer::
-            serialize_collection(mem + md.metadata_offset,
-                                 md.metadata.begin(),
-                                 md.metadata.end(),
-                                 md.metadata_metadata);
+        vector<typename ChildSerializer::ImmutableMetadata> imds(length);
 
         // And now the data from each of the child arrays
         for (int i = 0; first != last;  ++first, ++i) {
             const typename std::iterator_traits<Iterator>::reference val
                 = *first;
-            typename ChildSerializer::WorkingMetadata & wmd
-                = md.metadata[i];
+            typename ChildSerializer::WorkingMetadata & wmd = md.metadata[i];
 
-            wmd = ChildSerializer::
+            imds[i]
+                = ChildSerializer::
                 serialize_collection(mem + md.data_offset + md.offsets[i],
                                      val.begin(), val.end(),
                                      wmd);
         }
 
-        ImmutableMetadata result;
+        result.metadata.init(length, mem + md.metadata_offset,
+                             ChildMetadataSerializer::
+                             serialize_collection(mem + md.metadata_offset,
+                                                  imds.begin(),
+                                                  imds.end(),
+                                                  md.metadata_metadata));
+        
+
+        return result;
+    }
+
+    // Extract entry n out of the total
+    static Vector<T> extract(const long * mem, int n,
+                             const ImmutableMetadata & metadata)
+    {
+        int length = metadata.length();
+        if (n < 0 || n >= length)
+            throw Exception("index out of range extracting vector element");
+
+        // Get the offset, the length and the child metadata
+        size_t el_offset = metadata.data_offset + metadata.offsets[n];
+        size_t el_length = metadata.lengths[n];
+        ChildImmutableMetadata child_metadata = metadata.metadata[n];
+        
+        Vector<T> result(el_length, mem + el_offset, child_metadata);
         return result;
     }
 };
@@ -788,4 +813,6 @@ BOOST_AUTO_TEST_CASE(test_nested1)
     BOOST_CHECK_EQUAL(v1[2], values[2]);
     BOOST_CHECK_EQUAL(v1[3], values[3]);
     BOOST_CHECK_EQUAL(v1[4], values[4]);
+
+    cerr << "v1[3] = " << v1[3] << endl;
 }
