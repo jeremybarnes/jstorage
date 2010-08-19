@@ -572,12 +572,31 @@ std::ostream & operator << (std::ostream & stream, const Vector<T> & vec)
 }
 
 template<typename ChildMetadata>
+struct VectorImmutableMetadataEntry {
+    unsigned offset;
+    unsigned length;
+    ChildMetadata metadata;
+
+    typedef CollectionSerializer<ChildImmutableMetadata> ChildMetadataSerializer;
+
+    struct WorkingMetadata {
+        Bits offset_bits;
+        Bits length_bits;
+        typename ChildMetadataSerializer::WorkingMetadata metadata;
+    };
+
+    struct ImmutableMetadata {
+        Bits offset_bits;
+        Bits length_bits;
+        typename ChildMetadataSerializer::ImmutableMetadata metadata;
+    };
+};
+
+template<typename ChildMetadata>
 struct VectorImmutableMetadata {
-    Vector<unsigned> offsets;
-    Vector<unsigned> lengths;
-    Vector<ChildMetadata> metadata;
+    Vector<VectorImmutableMetadataEntry> entries;
     unsigned data_offset;
-    unsigned length() const { return offsets.size(); }
+    unsigned length() const { return entries.size(); }
 };
 
 template<typename T>
@@ -593,13 +612,15 @@ struct CollectionSerializer<Vector<T> > {
 
     struct WorkingMetadata {
         WorkingMetadata(size_t length)
-            : offsets(length), lengths(length), metadata(length)
+            : entries(length)
         {
         }
 
-        vector<size_t> offsets;
-        vector<size_t> lengths;
-        vector<ChildWorkingMetadata> metadata;
+        struct Entry {
+            size_t offset;
+            size_t length;
+            ChildWorkingMetadata metadata;
+        };
 
         // how many words in the various entries start
         size_t length_offset, metadata_offset, data_offset;
