@@ -74,7 +74,7 @@ std::ostream & operator << (std::ostream & stream, Bits bits)
     return stream << format("Bits(%d)", bits.value());
 }
 
-struct MemoryManager {
+struct BitwiseMemoryManager {
 
     const long * resolve(size_t offset)
     {
@@ -196,7 +196,7 @@ struct CollectionSerializer {
         for (int i = 0; first != last;  ++first, ++i)
             Base::prepare(*first, metadata, i);
 
-        return MemoryManager::words_required(bits_per_entry(), length);
+        return BitwiseMemoryManager::words_required(bits_per_entry(), length);
     }
 
     // Extract entry n out of the total
@@ -219,7 +219,7 @@ struct CollectionSerializer {
 
     size_t words_required(size_t length)
     {
-        return MemoryManager::words_required(bits_per_entry(), length);
+        return BitwiseMemoryManager::words_required(bits_per_entry(), length);
     }
 };
 #endif
@@ -346,7 +346,7 @@ struct CollectionSerializer<unsigned> {
                                           highest_bit(uvalue, -1) + 1);
         }
 
-        return MemoryManager::words_required(md, length);
+        return BitwiseMemoryManager::words_required(md, length);
     }
 
     // Extract entry n out of the total
@@ -404,7 +404,7 @@ struct CollectionSerializer<Bits> {
                                           highest_bit(uvalue.value(), -1) + 1);
         }
 
-        return MemoryManager::words_required(md, length);
+        return BitwiseMemoryManager::words_required(md, length);
     }
 
     // Extract entry n out of the total
@@ -462,7 +462,7 @@ struct Vector {
 
     // Create and populate with data from a range
     template<typename T2>
-    Vector(MemoryManager & mm, const std::vector<T2> & vec)
+    Vector(BitwiseMemoryManager & mm, const std::vector<T2> & vec)
     {
         init(mm, vec.begin(), vec.end());
     }
@@ -476,7 +476,7 @@ struct Vector {
     }
 
     template<typename Iterator>
-    void init(MemoryManager & mm, Iterator first, Iterator last)
+    void init(BitwiseMemoryManager & mm, Iterator first, Iterator last)
     {
         length_ = last - first;
         typename Serializer::WorkingMetadata metadata
@@ -576,27 +576,30 @@ struct VectorImmutableMetadataEntry {
     unsigned offset;
     unsigned length;
     ChildMetadata metadata;
+};
 
-    typedef CollectionSerializer<ChildImmutableMetadata> ChildMetadataSerializer;
+template<typename ChildMetadata>
+struct CollectionSerializer<VectorImmutableMetadataEntry<ChildMetadata> > {
+    typedef CollectionSerializer<ChildMetadata> ChildMetadataSerializer;
 
     struct WorkingMetadata {
-        Bits offset_bits;
-        Bits length_bits;
-        typename ChildMetadataSerializer::WorkingMetadata metadata;
+        Bits offset_md;
+        Bits length_md;
+        typename ChildMetadataSerializer::WorkingMetadata metadata_md;
     };
 
     struct ImmutableMetadata {
         Bits offset_bits;
         Bits length_bits;
-        typename ChildMetadataSerializer::ImmutableMetadata metadata;
+        typename ChildMetadataSerializer::ImmutableMetadata metadata_md;
     };
 };
 
 template<typename ChildMetadata>
-struct VectorImmutableMetadata {
-    Vector<VectorImmutableMetadataEntry> entries;
+struct VectorImmutableMetadata
+    : public ArrayAndMetadata<VectorImmutableMetadataEntry<ChildMetadata>,
+                              unsigned> {
     unsigned data_offset;
-    unsigned length() const { return entries.size(); }
 };
 
 template<typename T>
@@ -606,9 +609,6 @@ struct CollectionSerializer<Vector<T> > {
 
     typedef typename ChildSerializer::WorkingMetadata ChildWorkingMetadata;
     typedef typename ChildSerializer::ImmutableMetadata ChildImmutableMetadata;
-
-    typedef CollectionSerializer<unsigned> LengthSerializer;
-    typedef CollectionSerializer<ChildImmutableMetadata> ChildMetadataSerializer;
 
     struct WorkingMetadata {
         WorkingMetadata(size_t length)
@@ -622,15 +622,19 @@ struct CollectionSerializer<Vector<T> > {
             ChildWorkingMetadata metadata;
         };
 
-        // how many words in the various entries start
-        size_t length_offset, metadata_offset, data_offset;
+        vector<Entry> entries;
 
-        typename LengthSerializer::WorkingMetadata offsets_metadata;
-        typename LengthSerializer::WorkingMetadata lengths_metadata;
-        typename ChildMetadataSerializer::WorkingMetadata metadata_metadata;
+        // how many words in the various entries start
+        size_t data_offset;
+        
+        // Metadata for serialization of the entries array
+        typename ChildMetadataSerializer::WorkingMetadata entries_md;
     };
 
-    typedef VectorImmutableMetadata<typename ChildSerializer::ImmutableMetadata>
+    typedef VectorImmutableMetadataEntry<ChildImmutableMetadata>
+        ImmutableMetadataEntry;
+
+    typedef VectorImmutableMetadata<ChildImmutableMetadata>
         ImmutableMetadata;
     
     static WorkingMetadata new_metadata(size_t length)
@@ -651,22 +655,31 @@ struct CollectionSerializer<Vector<T> > {
         size_t total_words = 0;
 
         for (int i = 0; first != last;  ++first, ++i) {
+            typename WorkingMetadata::Entry & entry = md.entries[i];
+
             const typename std::iterator_traits<Iterator>::reference val
                 = *first;
-            md.lengths[i] = val.size();
-            typename ChildSerializer::WorkingMetadata & wmd
-                = md.metadata[i];
 
-            wmd = ChildSerializer::new_metadata(val.size());
+            entry.length = val.size();
+            entry.metadata = ChildSerializer::new_metadata(val.size());
             size_t nwords = ChildSerializer::prepare(val.begin(), val.end(),
-                                                     wmd);
+                                                     entry.metadata);
             
-            md.offsets[i] = total_words;
+            entry.offset = total_words;
             total_words += nwords;
         }
 
-        // Add to that the words necessary to serialize the metadata arrays
-        // for the children
+        // Add to that the words necessary to serialize the metadata array
+        md.entries_md
+            = ChildMetadataSerializer::
+        typename ChildMetadataSerializer::WorkingMetadata entries_md;
+
+        
+        typedef CollectionSerializer<VectorImmutableMetadataEntry<ChildMetadata> > {
+        
+
+        md.data_offset = 0;
+
 
         md.offsets_metadata = LengthSerializer::new_metadata(length);
         size_t offset_words = LengthSerializer::prepare(md.offsets.begin(),
@@ -766,16 +779,15 @@ struct CollectionSerializer<Vector<T> > {
         //cerr << "lengths = " << metadata.lengths << endl;
         //cerr << "md      = " << metadata.metadata << endl;
 
-        int length = metadata.length();
+        int length = metadata.size();
         if (n < 0 || n >= length)
             throw Exception("index out of range extracting vector element");
 
         // Get the offset, the length and the child metadata
-        size_t el_offset = metadata.data_offset + metadata.offsets[n];
-        size_t el_length = metadata.lengths[n];
-        ChildImmutableMetadata child_metadata = metadata.metadata[n];
+        ImmutableMetadataEntry entry = metadata[n];
+        size_t el_offset = metadata.data_offset + entry.offset;
         
-        Vector<T> result(el_length, mem + el_offset, child_metadata);
+        Vector<T> result(entry.length, mem + el_offset, entry.metadata);
         return result;
     }
 };
@@ -981,7 +993,7 @@ struct CollectionSerializer<VectorImmutableMetadata<ChildMetadata> > {
 
 BOOST_AUTO_TEST_CASE( test_non_nested )
 {
-    MemoryManager mm;
+    BitwiseMemoryManager mm;
 
     vector<unsigned> values = boost::assign::list_of<int>(1)(2)(3)(4);
     Vector<unsigned> v1(mm, values);
@@ -1009,7 +1021,7 @@ bool operator == (const std::vector<T1> & v1, const Vector<T2> & v2)
 
 BOOST_AUTO_TEST_CASE(test_nested1)
 {
-    MemoryManager mm;
+    BitwiseMemoryManager mm;
 
     vector<unsigned> values1 = boost::assign::list_of<int>(1)(2)(3)(4);
     vector<unsigned> values2 = boost::assign::list_of<int>(5)(6);
@@ -1039,7 +1051,7 @@ BOOST_AUTO_TEST_CASE(test_nested1)
 #if 0
 BOOST_AUTO_TEST_CASE(test_nested2)
 {
-    MemoryManager mm;
+    BitwiseMemoryManager mm;
 
     vector<unsigned> values1 = boost::assign::list_of<int>(1)(2)(3)(4);
     vector<unsigned> values2 = boost::assign::list_of<int>(5)(6);
