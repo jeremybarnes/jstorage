@@ -571,6 +571,15 @@ std::ostream & operator << (std::ostream & stream, const Vector<T> & vec)
     return stream << "]";
 }
 
+template<typename ChildMetadata>
+struct VectorImmutableMetadata {
+    Vector<unsigned> offsets;
+    Vector<unsigned> lengths;
+    Vector<ChildMetadata> metadata;
+    unsigned data_offset;
+    unsigned length() const { return offsets.size(); }
+};
+
 template<typename T>
 struct CollectionSerializer<Vector<T> > {
 
@@ -599,15 +608,10 @@ struct CollectionSerializer<Vector<T> > {
         typename LengthSerializer::WorkingMetadata lengths_metadata;
         typename ChildMetadataSerializer::WorkingMetadata metadata_metadata;
     };
-    
-    struct ImmutableMetadata {
-        Vector<unsigned> offsets;
-        Vector<unsigned> lengths;
-        Vector<typename ChildSerializer::ImmutableMetadata> metadata;
-        unsigned data_offset;
-        unsigned length() const { return offsets.size(); }
-    };
 
+    typedef VectorImmutableMetadata<typename ChildSerializer::ImmutableMetadata>
+        ImmutableMetadata;
+    
     static WorkingMetadata new_metadata(size_t length)
     {
         WorkingMetadata result(length);
@@ -683,9 +687,9 @@ struct CollectionSerializer<Vector<T> > {
     serialize_collection(long * mem,
                          Iterator first, Iterator last, WorkingMetadata & md)
     {
-        cerr << "offsets = " << md.offsets << endl;
-        cerr << "lengths = " << md.lengths << endl;
-        cerr << "md      = " << md.metadata << endl;
+        //cerr << "offsets = " << md.offsets << endl;
+        //cerr << "lengths = " << md.lengths << endl;
+        //cerr << "md      = " << md.metadata << endl;
 
         int length = md.offsets.size();
 
@@ -737,6 +741,10 @@ struct CollectionSerializer<Vector<T> > {
     static Vector<T> extract(const long * mem, int n,
                              const ImmutableMetadata & metadata)
     {
+        //cerr << "offsets = " << metadata.offsets << endl;
+        //cerr << "lengths = " << metadata.lengths << endl;
+        //cerr << "md      = " << metadata.metadata << endl;
+
         int length = metadata.length();
         if (n < 0 || n >= length)
             throw Exception("index out of range extracting vector element");
@@ -751,6 +759,196 @@ struct CollectionSerializer<Vector<T> > {
     }
 };
 
+#if 0
+template<typename ChildMetadata>
+struct CollectionSerializer<VectorImmutableMetadata<ChildMetadata> > {
+
+    typedef CollectionSerializer<T> ChildSerializer;
+    
+    typedef typename ChildSerializer::WorkingMetadata ChildWorkingMetadata;
+    typedef typename ChildSerializer::ImmutableMetadata ChildImmutableMetadata;
+
+    typedef CollectionSerializer<unsigned> LengthSerializer;
+    typedef CollectionSerializer<ChildImmutableMetadata> ChildMetadataSerializer;
+    // To serialize a collection of these:
+    // - The data offsets become a vector
+    // 
+    struct WorkingMetadata {
+        // Offset of each vector from the first word
+        Vector<unsigned> start_offsets;
+
+        // How much space is taken up by the header in each of them
+        Vector<unsigned> data_offsets;
+    };
+
+    struct WorkingMetadata {
+        WorkingMetadata(size_t length)
+            : offsets(length), lengths(length), metadata(length)
+        {
+        }
+
+        vector<size_t> offsets;
+        vector<size_t> lengths;
+        vector<ChildWorkingMetadata> metadata;
+
+        // how many words in the various entries start
+        size_t length_offset, metadata_offset, data_offset;
+
+        typename LengthSerializer::WorkingMetadata offsets_metadata;
+        typename LengthSerializer::WorkingMetadata lengths_metadata;
+        typename ChildMetadataSerializer::WorkingMetadata metadata_metadata;
+    };
+
+    typedef VectorImmutableMetadata<typename ChildSerializer::ImmutableMetadata>
+        ImmutableMetadata;
+    
+    static WorkingMetadata new_metadata(size_t length)
+    {
+        WorkingMetadata result(length);
+        return result;
+    }
+
+    // Prepare to serialize.  We mostly work out the size of the metadata
+    // here.
+    template<typename Iterator>
+    static size_t prepare(Iterator first, Iterator last, WorkingMetadata & md)
+    {
+        size_t length = last - first;
+        
+        // Serialize each of the sub-arrays, taking the absolute offset
+        // of each one
+        size_t total_words = 0;
+
+        for (int i = 0; first != last;  ++first, ++i) {
+            const typename std::iterator_traits<Iterator>::reference val
+                = *first;
+            md.lengths[i] = val.size();
+            typename ChildSerializer::WorkingMetadata & wmd
+                = md.metadata[i];
+
+            wmd = ChildSerializer::new_metadata(val.size());
+            size_t nwords = ChildSerializer::prepare(val.begin(), val.end(),
+                                                     wmd);
+            
+            md.offsets[i] = total_words;
+            total_words += nwords;
+        }
+
+        // Add to that the words necessary to serialize the metadata arrays
+        // for the children
+
+        md.offsets_metadata = LengthSerializer::new_metadata(length);
+        size_t offset_words = LengthSerializer::prepare(md.offsets.begin(),
+                                                        md.offsets.end(),
+                                                        md.offsets_metadata);
+
+        md.lengths_metadata = LengthSerializer::new_metadata(length);
+        size_t length_words = LengthSerializer::prepare(md.lengths.begin(),
+                                                        md.lengths.end(),
+                                                        md.lengths_metadata);
+
+        md.metadata_metadata = ChildMetadataSerializer::new_metadata(length);
+        size_t metadata_words
+            = ChildMetadataSerializer
+            ::prepare(md.metadata.begin(),
+                      md.metadata.end(),
+                      md.metadata_metadata);
+
+        md.length_offset = offset_words;
+        md.metadata_offset = offset_words + length_words;
+        md.data_offset = md.metadata_offset + metadata_words;
+
+        cerr << "data words " << total_words
+             << " offset words " << offset_words
+             << " length words " << length_words
+             << " md words " << metadata_words
+             << " total words " << total_words + md.data_offset
+             << endl;
+
+        total_words += md.data_offset;
+
+        return total_words;
+    }
+
+    // Serialize a homogeneous collection where each of the elements is a
+    // vector<T>.  We don't serialize any details of the collection itself.
+    template<typename Iterator>
+    static ImmutableMetadata
+    serialize_collection(long * mem,
+                         Iterator first, Iterator last, WorkingMetadata & md)
+    {
+        //cerr << "offsets = " << md.offsets << endl;
+        //cerr << "lengths = " << md.lengths << endl;
+        //cerr << "md      = " << md.metadata << endl;
+
+        int length = md.offsets.size();
+
+        ImmutableMetadata result;
+        result.data_offset = md.data_offset;
+        
+        // First: the three metadata arrays
+        result.offsets.init(length, mem,
+                            LengthSerializer::
+                            serialize_collection(mem,
+                                                 md.offsets.begin(),
+                                                 md.offsets.end(),
+                                                 md.offsets_metadata));
+        
+        result.lengths.init(length, mem + md.length_offset,
+                            LengthSerializer::
+                            serialize_collection(mem + md.length_offset,
+                                                 md.lengths.begin(),
+                                                 md.lengths.end(),
+                                                 md.lengths_metadata));
+
+        vector<typename ChildSerializer::ImmutableMetadata> imds(length);
+
+        // And now the data from each of the child arrays
+        for (int i = 0; first != last;  ++first, ++i) {
+            const typename std::iterator_traits<Iterator>::reference val
+                = *first;
+            typename ChildSerializer::WorkingMetadata & wmd = md.metadata[i];
+
+            imds[i]
+                = ChildSerializer::
+                serialize_collection(mem + md.data_offset + md.offsets[i],
+                                     val.begin(), val.end(),
+                                     wmd);
+        }
+
+        result.metadata.init(length, mem + md.metadata_offset,
+                             ChildMetadataSerializer::
+                             serialize_collection(mem + md.metadata_offset,
+                                                  imds.begin(),
+                                                  imds.end(),
+                                                  md.metadata_metadata));
+        
+
+        return result;
+    }
+
+    // Extract entry n out of the total
+    static Vector<T> extract(const long * mem, int n,
+                             const ImmutableMetadata & metadata)
+    {
+        //cerr << "offsets = " << metadata.offsets << endl;
+        //cerr << "lengths = " << metadata.lengths << endl;
+        //cerr << "md      = " << metadata.metadata << endl;
+
+        int length = metadata.length();
+        if (n < 0 || n >= length)
+            throw Exception("index out of range extracting vector element");
+
+        // Get the offset, the length and the child metadata
+        size_t el_offset = metadata.data_offset + metadata.offsets[n];
+        size_t el_length = metadata.lengths[n];
+        ChildImmutableMetadata child_metadata = metadata.metadata[n];
+        
+        Vector<T> result(el_length, mem + el_offset, child_metadata);
+        return result;
+    }
+};
+#endif
 
 /*****************************************************************************/
 /* TEST CASES                                                                */
@@ -816,3 +1014,50 @@ BOOST_AUTO_TEST_CASE(test_nested1)
 
     cerr << "v1[3] = " << v1[3] << endl;
 }
+
+#if 0
+BOOST_AUTO_TEST_CASE(test_nested2)
+{
+    MemoryManager mm;
+
+    vector<unsigned> values1 = boost::assign::list_of<int>(1)(2)(3)(4);
+    vector<unsigned> values2 = boost::assign::list_of<int>(5)(6);
+    vector<unsigned> values3;
+    vector<unsigned> values4 = boost::assign::list_of<int>(7)(8)(9)(10)(11);
+    vector<unsigned> values5 = boost::assign::list_of<int>(0)(0)(0)(0)(0);
+
+    vector<vector<unsigned> > vvalues1;
+    vvalues1.push_back(values1);
+    vvalues1.push_back(values2);
+    vvalues1.push_back(values3);
+    vvalues1.push_back(values4);
+    vvalues1.push_back(values5);
+
+    vector<vector<unsigned> > vvalues2;
+    vvalues2.push_back(values5);
+
+    vector<vector<unsigned> > vvalues3;
+
+    vector<vector<unsigned> > vvalues4;
+    vvalues4.push_back(values5);
+    vvalues4.push_back(values1);
+    vvalues4.push_back(values2);
+    vvalues4.push_back(values3);
+
+    vector<vector<vector<unsigned> > > vvvalues;
+    vvvalues.push_back(vvalues1);
+    vvvalues.push_back(vvalues2);
+    vvvalues.push_back(vvalues3);
+    vvvalues.push_back(vvalues4);
+
+    Vector<Vector<Vector<unsigned> > > v1(mm, vvvalues);
+
+    BOOST_CHECK_EQUAL(v1.size(), vvvalues.size());
+    BOOST_CHECK_EQUAL(v1[0], vvvalues[0]);
+    BOOST_CHECK_EQUAL(v1[1], vvvalues[1]);
+    BOOST_CHECK_EQUAL(v1[2], vvvalues[2]);
+    BOOST_CHECK_EQUAL(v1[3], vvvalues[3]);
+
+    cerr << "v1[3] = " << v1[3] << endl;
+}
+#endif
