@@ -205,11 +205,11 @@ struct CollectionSerializer : public BaseT {
     // Extract entry n out of the total
     static T
     extract_from_collection(const long * mem, int n,
-                            ImmutableMetadata md)
-    {
-        BitReader reader(mem, n * md);
-        return Base::reconstitute(reader, md);
-    }
+                            ImmutableMetadata md);
+    //{
+    //    BitReader reader(mem, n * md);
+    //    return Base::reconstitute(reader, md);
+    //}
 
     // Serialize a homogeneous collection where each of the elements is of
     // the same type.  We don't serialize any details of the collection itself,
