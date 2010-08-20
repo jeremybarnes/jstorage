@@ -52,9 +52,11 @@ struct EncodedUnsignedIntegralSerializer {
         return Bits();
     }
 
-    // Serialize a single unsigned value, given metadata
+    // Serialize a single value.  The base points to the start of the block
+    // of memory for this part of the data structure
     template<typename ValueT>
-    static void serialize(BitWriter & writer, const ValueT & value,
+    static void serialize(long * base,
+                          BitWriter & writer, const ValueT & value,
                           WorkingMetadata metadata, int object_num)
     {
         Integral uvalue = Encoder::encode(value);
@@ -62,7 +64,8 @@ struct EncodedUnsignedIntegralSerializer {
     }
 
     // Reconstitute a single object, given metadata
-    static Value reconstitute(BitReader & reader, ImmutableMetadata metadata)
+    static Value reconstitute(const long * base,
+                              BitReader & reader, ImmutableMetadata metadata)
     {
         return Encoder::decode(reader.read(metadata));
     }
@@ -221,7 +224,7 @@ struct CollectionSerializer : public BaseT {
     {
         Bits bit_offset = Base::get_element_offset(n, md);
         BitReader reader(mem, bit_offset);
-        return Base::reconstitute(reader, md);
+        return Base::reconstitute(mem, reader, md);
     }
 
     // Serialize a homogeneous collection where each of the elements is of
@@ -238,12 +241,31 @@ struct CollectionSerializer : public BaseT {
     {
         BitWriter writer(mem);
         for (int i = 0; first != last;  ++first, ++i)
-            Base::serialize(writer, *first, md, i);
+            Base::serialize(mem, writer, *first, md, i);
 
         return Base::to_immutable(md);
     }
 };
 
+/*****************************************************************************/
+/* BASEANDDATASERIALIZER                                                     */
+/*****************************************************************************/
+
+/** Combine two serializers:
+    - a base serializer, that serializes a fixed-width array;
+    - a child serializer, that serializes some variable length data in some
+      memory that's allocated further on.
+*/
+
+template<typename BaseSerializer, typename ChildSerializer>
+struct BaseAndChildSerializer {
+};
+
+// If there's no child, then we don't need to do all this junk...
+template<typename BaseSerializer>
+struct BaseAndChildSerializer<BaseSerializer, void>
+    : public CollectionSerializer<typename BaseSerializer::Value, BaseSerializer> {
+};
 
 } // namespace JMVCC
 
