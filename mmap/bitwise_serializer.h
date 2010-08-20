@@ -67,6 +67,12 @@ struct EncodedUnsignedIntegralSerializer {
         return Encoder::decode(reader.read(metadata));
     }
 
+    // Find how many bits to advance to get to this element
+    static Bits get_element_offset(int n, ImmutableMetadata metadata)
+    {
+        return n * metadata;
+    }
+
     // Scan a single item, updating the metadata
     static void prepare(Value value, WorkingMetadata & metadata,
                         int item_number)
@@ -80,6 +86,12 @@ struct EncodedUnsignedIntegralSerializer {
     static size_t words_required(WorkingMetadata metadata, size_t length)
     {
         return BitwiseMemoryManager::words_required(metadata, length);
+    }
+
+    // How many bits to store a single entry?
+    static Bits bits_per_entry(WorkingMetadata metadata)
+    {
+        return metadata;
     }
 
     // Convert metadata to immutable metadata
@@ -205,11 +217,12 @@ struct CollectionSerializer : public BaseT {
     // Extract entry n out of the total
     static T
     extract_from_collection(const long * mem, int n,
-                            ImmutableMetadata md);
-    //{
-    //    BitReader reader(mem, n * md);
-    //    return Base::reconstitute(reader, md);
-    //}
+                            ImmutableMetadata md)
+    {
+        Bits bit_offset = Base::get_element_offset(n, md);
+        BitReader reader(mem, bit_offset);
+        return Base::reconstitute(reader, md);
+    }
 
     // Serialize a homogeneous collection where each of the elements is of
     // the same type.  We don't serialize any details of the collection itself,

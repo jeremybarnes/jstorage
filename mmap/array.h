@@ -18,6 +18,7 @@
 
 namespace JMVCC {
 
+
 /*****************************************************************************/
 /* ARRAY                                                                     */
 /*****************************************************************************/
@@ -247,6 +248,39 @@ struct Serializer<ArrayMetadataEntry<ChildMetadata> > {
         typename UnsignedSerializer::ImmutableMetadata length_md;
         typename MetadataSerializer::ImmutableMetadata metadata_md;
     };
+
+    static WorkingMetadata new_metadata(size_t length)
+    {
+        WorkingMetadata result;
+        return result;
+    }
+
+    template<typename Value>
+    static void prepare(const Value & val, WorkingMetadata & metadata,
+                        int item_number)
+    {
+        UnsignedSerializer::prepare(val.offset, metadata.offset_md,
+                                    item_number);
+        UnsignedSerializer::prepare(val.length, metadata.length_md,
+                                    item_number);
+        MetadataSerializer::prepare(val.metadata, metadata.metadata_md,
+                                    item_number);
+    }
+
+    static size_t words_required(WorkingMetadata & metadata,
+                                 size_t length)
+    {
+        Bits bits_per_entry
+            = UnsignedSerializer::bits_per_entry(metadata.offset_md)
+            + UnsignedSerializer::bits_per_entry(metadata.length_md)
+            + MetadataSerializer::bits_per_entry(metadata.metadata_md);
+
+        size_t result
+            = BitwiseMemoryManager::words_required(bits_per_entry, length);
+
+        return result;
+    }
+
 };
 
 
@@ -292,7 +326,7 @@ struct Serializer<Array<T> > {
         return result;
     }
 
-    static size_t words_required(const WorkingMetadata & metadata,
+    static size_t words_required(WorkingMetadata & metadata,
                                  size_t length)
     {
         size_t result = metadata.total_words;
@@ -315,17 +349,33 @@ struct Serializer<Array<T> > {
     static void prepare(const VectorLike & val, WorkingMetadata & metadata,
                         int item_number)
     {
-        typename WorkingMetadata::Entry & entry = metadata[item_number];
+        typename WorkingMetadata::Entry & entry = metadata.entries[item_number];
         entry.length = val.size();
-        entry.offset = entry.total_words;
+        entry.offset = metadata.total_words;
         entry.metadata = ChildSerializer::new_metadata(val.size());
         size_t nwords = ChildSerializer::
             prepare_collection(val.begin(), val.end(), entry.metadata);
-        entry.total_words += nwords;
+        metadata.total_words += nwords;
     }
 
     // Convert metadata to immutable metadata
-    static ImmutableMetadata to_immutable(WorkingMetadata metadata);
+    static ImmutableMetadata to_immutable(WorkingMetadata metadata)
+    {
+        ImmutableMetadata result;
+        throw ML::Exception("to_immutable");
+        return result;
+    }
+
+    // Write an element as part of a collection
+    template<typename ValueT>
+    static void serialize(BitWriter & writer, const ValueT & value,
+                          WorkingMetadata metadata, int object_num);
+
+    // Read an element from a collection
+    static Bits get_element_offset(int n, ImmutableMetadata metadata);
+
+    // Reconstitute a single object, given metadata
+    static Value reconstitute(BitReader & reader, ImmutableMetadata metadata);
 
 #if 0
 

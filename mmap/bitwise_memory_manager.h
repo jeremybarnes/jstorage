@@ -45,6 +45,23 @@ Bits operator * (Integral i, Bits b)
     return b * i;
 }
 
+template<typename Integral>
+Bits operator + (Integral i, Bits b)
+{
+    return Bits(i + b.value());
+}
+
+template<typename Integral>
+Bits operator + (Bits b, Integral i)
+{
+    return Bits(i + b.value());
+}
+
+inline Bits operator + (Bits b, Bits b2)
+{
+    return Bits(b2.value() + b.value());
+}
+
 inline std::ostream & operator << (std::ostream & stream, Bits bits)
 {
     return stream << ML::format("Bits(%d)", bits.value());

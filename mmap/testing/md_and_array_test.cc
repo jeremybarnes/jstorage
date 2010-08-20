@@ -148,6 +148,8 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
+namespace JMVCC {
+
 template<typename T1, typename T2>
 bool operator == (const Array<T1> & v1, const std::vector<T2> & v2)
 {
@@ -161,6 +163,8 @@ bool operator == (const std::vector<T1> & v1, const Array<T2> & v2)
 {
     return v2 == v1;
 }
+
+} // namespace JMVCC
 
 BOOST_AUTO_TEST_CASE(test_nested1)
 {
