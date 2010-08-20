@@ -233,9 +233,11 @@ struct ArrayMetadataEntry {
 };
 
 template<typename ChildMetadata>
-struct Serializer<ArrayMetadataEntry<ChildMetadata> > {
+struct CollectionSerializer<ArrayMetadataEntry<ChildMetadata> > {
     typedef CollectionSerializer<unsigned> UnsignedSerializer;
     typedef CollectionSerializer<ChildMetadata> MetadataSerializer;
+
+    typedef ArrayMetadataEntry<ChildMetadata> Value;
 
     struct WorkingMetadata {
         typename UnsignedSerializer::WorkingMetadata offset_md;
@@ -281,11 +283,132 @@ struct Serializer<ArrayMetadataEntry<ChildMetadata> > {
         return result;
     }
 
+    template<typename ValueT>
+    static void serialize(BitWriter & writer, const ValueT & value,
+                          WorkingMetadata metadata, int object_num)
+    {
+        serialize(writer, value.offset, value.length, value.metadata,
+                  metadata);
+    }
+
+    static void serialize(BitWriter & writer, unsigned offset, unsigned length,
+                          ChildMetadata child_metadata,
+                          WorkingMetadata metadata)
+    {
+        UnsignedSerializer::serialize(writer, offset, metadata.offset_md);
+        UnsignedSerializer::serialize(writer, length, metadata.length_md);
+        UnsignedSerializer::serialize(writer, child_metadata, metadata.metadata_md);
+    }
+
+    template<typename Iterator>
+    static size_t
+    prepare_collection(Iterator first, Iterator last,
+                       WorkingMetadata & md);
+#if 0
+    {
+        // We have an array of arrays, that's going to be serialized to a
+        // contiguous array of memory somewhere.
+        //
+        // Its own length and offset is never serialized; it's the job of the
+        // owning collection to take care of that, as with the sizing
+        // information for the entries.
+        // 
+        // Its data is serialized as:
+        // - First, an array of entries, each of which contains (packed):
+        //   - The length of the sub-array
+        //   - The offset of the sub-array (taken from the end of the
+        //     entries array)
+        //   - The information necessary to size the array elements
+        //
+        //   Next, there's a big blob of memory that contains the serialized
+        //   version of each of the arrays.
+
+        size_t length = last - first;
+        
+        // Figure out how big the sub-arrays are so that we can get their
+        // offsets.
+        for (int i = 0; first != last;  ++first, ++i)
+            prepare(*first, md, i);
+
+        // Figure out how much memory we need to serialize the entries
+        // themselves.
+        md.entries_md = EntrySerializer::new_metadata(length);
+        size_t entries_words = EntrySerializer::
+            prepare_collection(md.entries.begin(),
+                               md.entries.end(),
+                               md.entries_md);
+
+        // Record where the boundary will be
+        md.data_offset = entries_words;
+
+        // Return the total memory
+        return md.total_words + entries_words;
+    }
+#endif
+
+    // Serialize a homogeneous collection where each of the elements is a
+    // vector<T>.  We don't serialize any details of the collection itself.
+    template<typename Iterator>
+    static ImmutableMetadata
+    serialize_collection(long * mem,
+                         Iterator first, Iterator last, WorkingMetadata & md);
+#if 0
+    {
+        int length = md.entries.size();
+
+        // Writer for the entries
+        BitWriter entry_writer(mem);
+
+        std::vector<ImmutableMetadataEntry> entries(length);
+
+        for (int i = 0; first != last;  ++first, ++i) {
+            // child array
+            const typename std::iterator_traits<Iterator>::reference val
+                = *first;
+            ChildWorkingMetadata & wmd = md.entries[i].metadata;
+
+            long * vmem = mem + md.data_offset + md.entries[i].offset;
+
+            entries[i].offset = md.entries[i].offset;
+            entries[i].length = md.entries[i].length;
+            entries[i].metadata = ChildSerializer::
+                serialize_collection(vmem, val.begin(), val.end(), wmd);
+        }
+
+        typename EntrySerializer::ImmutableMetadata entries_md
+            = EntrySerializer::serialize_collection(mem,
+                                                    entries.begin(),
+                                                    entries.end(),
+                                                    md.entries_md);
+        
+        ImmutableMetadata result(length, mem, entries_md, md.data_offset);
+        return result;
+    }
+#endif
+
+    // Extract entry n out of the total
+    static Value extract_from_collection(const long * mem, int n,
+                                         const ImmutableMetadata & metadata)
+    {
+        // Get the offset, the length and the child metadata
+        Bits bit_offset = Base::get_element_offset(n, md);
+        BitReader reader(mem, bit_offset);
+
+        Value result;
+
+        result.offset = UnsignedSerializer::
+            reconstitute(reader, metadata.offset_md);
+        result.length = UnsignedSerializer::
+            reconstitute(reader, metadata.length_md);
+        result.metadata = UnsignedSerializer::
+            reconstitute(reader, metadata.metadata_md);
+
+        return result;
+    }
 };
 
-
 template<typename T>
-struct Serializer<Array<T> > {
+struct CollectionSerializer<Array<T> > {
 
     typedef Array<T> Value;
 
@@ -294,12 +417,13 @@ struct Serializer<Array<T> > {
     typedef typename ChildSerializer::WorkingMetadata ChildWorkingMetadata;
     typedef typename ChildSerializer::ImmutableMetadata ChildImmutableMetadata;
 
+    typedef ArrayMetadataEntry<ChildImmutableMetadata> ImmutableMetadataEntry;
+
     // Type of the immutable metadata to go with this entry
-    typedef ArrayAndData<ArrayMetadataEntry<ChildImmutableMetadata>,
-                         unsigned>
+    typedef ArrayAndData<ImmutableMetadataEntry, unsigned>
         ImmutableMetadata;
     
-    typedef CollectionSerializer<ArrayMetadataEntry<ChildImmutableMetadata> >
+    typedef CollectionSerializer<ImmutableMetadataEntry>
         EntrySerializer;
 
     struct WorkingMetadata {
@@ -377,77 +501,50 @@ struct Serializer<Array<T> > {
     // Reconstitute a single object, given metadata
     static Value reconstitute(BitReader & reader, ImmutableMetadata metadata);
 
-#if 0
-
     // Prepare to serialize.  We mostly work out the size of the metadata
     // here.
     template<typename Iterator>
-    static size_t prepare(Iterator first, Iterator last, WorkingMetadata & md)
+    static size_t
+    prepare_collection(Iterator first, Iterator last,
+                       WorkingMetadata & md)
     {
+        // We have an array of arrays, that's going to be serialized to a
+        // contiguous array of memory somewhere.
+        //
+        // Its own length and offset is never serialized; it's the job of the
+        // owning collection to take care of that, as with the sizing
+        // information for the entries.
+        // 
+        // Its data is serialized as:
+        // - First, an array of entries, each of which contains (packed):
+        //   - The length of the sub-array
+        //   - The offset of the sub-array (taken from the end of the
+        //     entries array)
+        //   - The information necessary to size the array elements
+        //
+        //   Next, there's a big blob of memory that contains the serialized
+        //   version of each of the arrays.
+
         size_t length = last - first;
         
-        // Serialize each of the sub-arrays, taking the absolute offset
-        // of each one
-        size_t total_words = 0;
+        // Figure out how big the sub-arrays are so that we can get their
+        // offsets.
+        for (int i = 0; first != last;  ++first, ++i)
+            prepare(*first, md, i);
 
-        for (int i = 0; first != last;  ++first, ++i) {
-            typename WorkingMetadata::Entry & entry = md.entries[i];
+        // Figure out how much memory we need to serialize the entries
+        // themselves.
+        md.entries_md = EntrySerializer::new_metadata(length);
+        size_t entries_words = EntrySerializer::
+            prepare_collection(md.entries.begin(),
+                               md.entries.end(),
+                               md.entries_md);
 
-            const typename std::iterator_traits<Iterator>::reference val
-                = *first;
+        // Record where the boundary will be
+        md.data_offset = entries_words;
 
-            entry.length = val.size();
-            entry.metadata = ChildSerializer::new_metadata(val.size());
-            size_t nwords = ChildSerializer::prepare(val.begin(), val.end(),
-                                                     entry.metadata);
-            
-            entry.offset = total_words;
-            total_words += nwords;
-        }
-
-        // Add to that the words necessary to serialize the metadata array
-        md.entries_md
-            = ChildMetadataSerializer::
-        typename ChildMetadataSerializer::WorkingMetadata entries_md;
-
-        
-        typedef CollectionSerializer<ArrayImmutableMetadataEntry<ChildMetadata> > {
-        
-
-        md.data_offset = 0;
-
-
-        md.offsets_metadata = LengthSerializer::new_metadata(length);
-        size_t offset_words = LengthSerializer::prepare(md.offsets.begin(),
-                                                        md.offsets.end(),
-                                                        md.offsets_metadata);
-
-        md.lengths_metadata = LengthSerializer::new_metadata(length);
-        size_t length_words = LengthSerializer::prepare(md.lengths.begin(),
-                                                        md.lengths.end(),
-                                                        md.lengths_metadata);
-
-        md.metadata_metadata = ChildMetadataSerializer::new_metadata(length);
-        size_t metadata_words
-            = ChildMetadataSerializer
-            ::prepare(md.metadata.begin(),
-                      md.metadata.end(),
-                      md.metadata_metadata);
-
-        md.length_offset = offset_words;
-        md.metadata_offset = offset_words + length_words;
-        md.data_offset = md.metadata_offset + metadata_words;
-
-        cerr << "data words " << total_words
-             << " offset words " << offset_words
-             << " length words " << length_words
-             << " md words " << metadata_words
-             << " total words " << total_words + md.data_offset
-             << endl;
-
-        total_words += md.data_offset;
-
-        return total_words;
+        // Return the total memory
+        return md.total_words + entries_words;
     }
 
     // Serialize a homogeneous collection where each of the elements is a
@@ -457,59 +554,40 @@ struct Serializer<Array<T> > {
     serialize_collection(long * mem,
                          Iterator first, Iterator last, WorkingMetadata & md)
     {
-        //cerr << "offsets = " << md.offsets << endl;
-        //cerr << "lengths = " << md.lengths << endl;
-        //cerr << "md      = " << md.metadata << endl;
+        int length = md.entries.size();
 
-        int length = md.offsets.size();
+        // Writer for the entries
+        BitWriter entry_writer(mem);
 
-        ImmutableMetadata result;
-        result.data_offset = md.data_offset;
-        
-        // First: the three metadata arrays
-        result.offsets.init(length, mem,
-                            LengthSerializer::
-                            serialize_collection(mem,
-                                                 md.offsets.begin(),
-                                                 md.offsets.end(),
-                                                 md.offsets_metadata));
-        
-        result.lengths.init(length, mem + md.length_offset,
-                            LengthSerializer::
-                            serialize_collection(mem + md.length_offset,
-                                                 md.lengths.begin(),
-                                                 md.lengths.end(),
-                                                 md.lengths_metadata));
+        std::vector<ImmutableMetadataEntry> entries(length);
 
-        vector<typename ChildSerializer::ImmutableMetadata> imds(length);
-
-        // And now the data from each of the child arrays
         for (int i = 0; first != last;  ++first, ++i) {
+            // child array
             const typename std::iterator_traits<Iterator>::reference val
                 = *first;
-            typename ChildSerializer::WorkingMetadata & wmd = md.metadata[i];
+            ChildWorkingMetadata & wmd = md.entries[i].metadata;
 
-            imds[i]
-                = ChildSerializer::
-                serialize_collection(mem + md.data_offset + md.offsets[i],
-                                     val.begin(), val.end(),
-                                     wmd);
+            long * vmem = mem + md.data_offset + md.entries[i].offset;
+
+            entries[i].offset = md.entries[i].offset;
+            entries[i].length = md.entries[i].length;
+            entries[i].metadata = ChildSerializer::
+                serialize_collection(vmem, val.begin(), val.end(), wmd);
         }
 
-        result.metadata.init(length, mem + md.metadata_offset,
-                             ChildMetadataSerializer::
-                             serialize_collection(mem + md.metadata_offset,
-                                                  imds.begin(),
-                                                  imds.end(),
-                                                  md.metadata_metadata));
+        typename EntrySerializer::ImmutableMetadata entries_md
+            = EntrySerializer::serialize_collection(mem,
+                                                    entries.begin(),
+                                                    entries.end(),
+                                                    md.entries_md);
         
-
+        ImmutableMetadata result(length, mem, entries_md, md.data_offset);
         return result;
     }
 
     // Extract entry n out of the total
-    static Array<T> extract(const long * mem, int n,
-                            const ImmutableMetadata & metadata)
+    static Array<T> extract_from_collection(const long * mem, int n,
+                                            const ImmutableMetadata & metadata)
     {
         //cerr << "offsets = " << metadata.offsets << endl;
         //cerr << "lengths = " << metadata.lengths << endl;
@@ -517,16 +595,15 @@ struct Serializer<Array<T> > {
 
         int length = metadata.size();
         if (n < 0 || n >= length)
-            throw Exception("index out of range extracting vector element");
+            throw ML::Exception("index out of range extracting vector element");
 
         // Get the offset, the length and the child metadata
         ImmutableMetadataEntry entry = metadata[n];
-        size_t el_offset = metadata.data_offset + entry.offset;
+        size_t el_offset = metadata.data() + entry.offset;
         
         Array<T> result(entry.length, mem + el_offset, entry.metadata);
         return result;
     }
-#endif
 
 };
     
