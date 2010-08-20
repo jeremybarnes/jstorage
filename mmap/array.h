@@ -388,7 +388,8 @@ struct CollectionSerializer<ArrayMetadataEntry<ChildMetadata> > {
 
     // Extract entry n out of the total
     static Value extract_from_collection(const long * mem, int n,
-                                         const ImmutableMetadata & metadata)
+                                         const ImmutableMetadata & metadata);
+#if 0
     {
         // Get the offset, the length and the child metadata
         Bits bit_offset = Base::get_element_offset(n, md);
@@ -405,6 +406,7 @@ struct CollectionSerializer<ArrayMetadataEntry<ChildMetadata> > {
 
         return result;
     }
+#endif
 };
 
 template<typename T>

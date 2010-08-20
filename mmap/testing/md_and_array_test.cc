@@ -10,6 +10,7 @@
 #include "jstorage/mmap/bitwise_memory_manager.h"
 #include "jstorage/mmap/bitwise_serializer.h"
 #include "jstorage/mmap/array.h"
+#include "jstorage/mmap/string.h"
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"
@@ -148,6 +149,8 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
+#if 0
+
 namespace JMVCC {
 
 template<typename T1, typename T2>
@@ -194,6 +197,7 @@ BOOST_AUTO_TEST_CASE(test_nested1)
 
     cerr << "v1[3] = " << v1[3] << endl;
 }
+#endif
 
 #if 0
 BOOST_AUTO_TEST_CASE(test_nested2)
