@@ -59,7 +59,8 @@ struct PairSerializer {
     template<typename Metadata>
     static Bits bits_per_entry(const Metadata & md)
     {
-        return md.first + md.second;
+        return Serializer1::bits_per_entry(md.first)
+            +  Serializer2::bits_per_entry(md.second);
     }
     
     static std::pair<T1, T2>
@@ -68,7 +69,7 @@ struct PairSerializer {
                  const ImmutableMetadata & md)
     {
         T1 res1 = Serializer1::reconstitute(mem, reader, md.first);
-        T2 res2 = Serializer1::reconstitute(mem, reader, md.first);
+        T2 res2 = Serializer2::reconstitute(mem, reader, md.second);
         return std::make_pair(res1, res2);
     }
 

@@ -11,6 +11,7 @@
 #include "jstorage/mmap/bitwise_serializer.h"
 #include "jstorage/mmap/array.h"
 #include "jstorage/mmap/pair.h"
+//#include "jstorage/mmap/tuple.h"
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"
@@ -157,6 +158,23 @@ BOOST_AUTO_TEST_CASE(test_pair_terminal)
 
     vector<pair<unsigned, unsigned> > values = boost::assign::list_of<pair<unsigned, unsigned> >(make_pair(1, 2))(make_pair(2, 3))(make_pair(3, 4))(make_pair(4, 5));
     Array<pair<unsigned, unsigned> > v1(mm, values);
+
+    BOOST_CHECK_EQUAL(v1.size(), values.size());
+    BOOST_CHECK_EQUAL(v1[0], values[0]);
+    BOOST_CHECK_EQUAL(v1[1], values[1]);
+    BOOST_CHECK_EQUAL(v1[2], values[2]);
+    BOOST_CHECK_EQUAL(v1[3], values[3]);
+}
+
+BOOST_AUTO_TEST_CASE(test_pair_of_pairs)
+{
+    BitwiseMemoryManager mm;
+
+    vector<pair<unsigned, pair<unsigned, unsigned> > > values
+        = boost::assign::list_of<pair<unsigned, pair<unsigned, unsigned> > >
+        (make_pair(1, make_pair(2, 3)))(make_pair(2, make_pair(3, 4)))
+        (make_pair(3, make_pair(4, 5)))(make_pair(4, make_pair(5, 6)));
+    Array<pair<unsigned, pair<unsigned, unsigned> > > v1(mm, values);
 
     BOOST_CHECK_EQUAL(v1.size(), values.size());
     BOOST_CHECK_EQUAL(v1[0], values[0]);

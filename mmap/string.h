@@ -9,6 +9,7 @@
 #define __jmvcc__string_h__
 
 #include "array.h"
+#include "pair.h"
 #include <string>
 
 
