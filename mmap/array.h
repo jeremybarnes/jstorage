@@ -23,68 +23,82 @@ namespace JMVCC {
 /* ARRAY                                                                     */
 /*****************************************************************************/
 
-template<typename T>
-struct Array {
-
-    size_t length_;
-    typedef CollectionSerializer<T> Serializer;
-    typedef typename Serializer::ImmutableMetadata Metadata;
-    Metadata metadata_;
-    const long * mem_;
-
-    Array()
-        : length_(0), mem_(0)
+template<typename ChildMetadata>
+struct ArrayMetadata {
+    ArrayMetadata()
+        : length(0), offset(0), metadata(ChildMetadata())
     {
     }
 
-    Array(size_t length, const long * mem,
-           const Metadata & metadata)
+    size_t length;
+    size_t offset;
+    ChildMetadata metadata;
+};
+
+template<typename T, typename EntrySerializerT = CollectionSerializer<T> >
+struct Array {
+    typedef EntrySerializerT EntrySerializer;
+    typedef ArrayMetadata<typename EntrySerializer::ImmutableMetadata>
+        Metadata;
+    
+    Metadata md_;
+    const long * mem_;
+
+    Array()
+        : mem_(0)
     {
-        init(length, mem, metadata);
+    }
+
+    Array(const long * mem, const Metadata & metadata)
+    {
+        init(mem, metadata);
     }
 
     // Create and populate with data from a range
     template<typename T2>
-    Array(BitwiseMemoryManager & mm, const std::vector<T2> & vec)
+    Array(BitwiseMemoryManager & mm,
+          const std::vector<T2> & vec)
     {
         init(mm, vec.begin(), vec.end());
     }
 
-    void init(size_t length, const long * mem,
-              const Metadata & metadata)
+    void init(const long * mem, const Metadata & metadata)
     {
-        length_ = length;
+        md_ = metadata;
         mem_ = mem;
-        metadata_ = metadata;
     }
 
     template<typename Iterator>
     void init(BitwiseMemoryManager & mm, Iterator first, Iterator last)
     {
-        length_ = last - first;
-        typename Serializer::WorkingMetadata metadata
-            = Serializer::new_metadata(length_);
+        Metadata md;
+        md_.length = last - first;
+        md_.offset = 0;
 
-        Serializer::prepare_collection(first, last, metadata);
+        typename EntrySerializer::WorkingMetadata metadata
+            = EntrySerializer::new_metadata(md_.length);
 
-        size_t child_words = Serializer::words_for_children(metadata);
-        size_t base_words  = Serializer::words_for_base(metadata, length_);
+        EntrySerializer::prepare_collection(first, last, metadata);
+
+        size_t child_words = EntrySerializer::words_for_children(metadata);
+        size_t base_words  = EntrySerializer::words_for_base(metadata, md_.length);
 
         long * mem = mm.allocate(base_words + child_words);
         mem_ = mem;
 
-        metadata_
-            = Serializer::serialize_collection(mem, first, last, metadata);
+        md_.metadata
+            = EntrySerializer::serialize_collection(mem, first, last, metadata);
     }
 
     size_t size() const
     {
-        return length_;
+        return md_.length;
     }
 
     T operator [] (int index) const
     {
-        return Serializer::extract_from_collection(mem_, index, metadata_);
+        return EntrySerializer::extract_from_collection(mem_ + md_.offset,
+                                                        index, md_.metadata);
     }
 
     struct const_iterator
@@ -144,7 +158,7 @@ struct Array {
 
     const_iterator end() const
     {
-        return const_iterator(*this, length_);
+        return const_iterator(*this, md_.length);
     }
 };
 
@@ -158,7 +172,7 @@ std::ostream & operator << (std::ostream & stream, const Array<T> & vec)
     return stream << "]";
 }
 
-
+#if 0
 /*****************************************************************************/
 /* ARRAY_AND_DATA                                                            */
 /*****************************************************************************/
@@ -223,7 +237,7 @@ operator << (std::ostream & stream, const ArrayAndData<T, D> & vec)
     }
     return stream << "] }";
 }
-
+#endif
 
 /*****************************************************************************/
 /* COLLECTIONSERIALIZER<ARRAY<T> >                                           */
@@ -413,6 +427,7 @@ struct CollectionSerializer<ArrayMetadataEntry<ChildMetadata> > {
 #endif
 };
 
+#if 0
 template<typename T>
 struct CollectionSerializer<Array<T> > {
 
@@ -612,6 +627,8 @@ struct CollectionSerializer<Array<T> > {
     }
 
 };
+#endif
+
     
 } // namespace JMVCC
 

@@ -10,7 +10,7 @@
 #include "jstorage/mmap/bitwise_memory_manager.h"
 #include "jstorage/mmap/bitwise_serializer.h"
 #include "jstorage/mmap/array.h"
-#include "jstorage/mmap/string.h"
+#include "jstorage/mmap/pair.h"
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"

@@ -88,14 +88,14 @@ struct BitwiseMemoryManager {
         bits?  Returns the result in the first entry and the number of
         wasted bits in the second.
     */
-    static std::pair<size_t, size_t> words_to_cover(Bits bits)
+    static std::pair<size_t, Bits> words_to_cover(Bits bits)
     {
         size_t nbits = bits.value();
         size_t factor = 8 * sizeof(long);
         size_t result = nbits / factor;
         size_t wasted = result * factor - nbits;
         result += (wasted > 0);
-        return std::make_pair(result, wasted);
+        return std::make_pair(result, Bits(wasted));
     }
 
     static size_t words_required(Bits bits, size_t length)
@@ -112,15 +112,16 @@ struct BitwiseMemoryManager {
     long * allocate(Bits bits, size_t length)
     {
         Bits nbits = bits * length;
-        std::pair<size_t, size_t> r = words_to_cover(nbits);
+        std::pair<size_t, Bits> r = words_to_cover(nbits);
 
-        size_t nwords = r.first, wasted = r.second;
+        size_t nwords = r.first;
+        bool any_wasted = r.second.value() > 0;
 
         long * result = new long[nwords];
 
         // Initialize the wasted part of memory to all zeros to avoid
         // repeatability errors caused by non-initialization.
-        if (wasted) result[nwords - 1] = 0;
+        if (any_wasted) result[nwords - 1] = 0;
         return result;
     }
 };
