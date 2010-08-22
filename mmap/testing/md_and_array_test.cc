@@ -22,6 +22,7 @@
 #include "jml/arch/demangle.h"
 #include "jml/utils/exc_assert.h"
 #include "jml/utils/vector_utils.h"
+#include "jml/utils/pair_utils.h"
 #include "jml/arch/bit_range_ops.h"
 #include "jml/arch/bitops.h"
 #include <boost/test/unit_test.hpp>
@@ -141,6 +142,21 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
 
     vector<unsigned> values = boost::assign::list_of<int>(1)(2)(3)(4);
     Array<unsigned> v1(mm, values);
+
+    BOOST_CHECK_EQUAL(v1.size(), values.size());
+    BOOST_CHECK_EQUAL(v1[0], values[0]);
+    BOOST_CHECK_EQUAL(v1[1], values[1]);
+    BOOST_CHECK_EQUAL(v1[2], values[2]);
+    BOOST_CHECK_EQUAL(v1[3], values[3]);
+}
+
+
+BOOST_AUTO_TEST_CASE(test_pair_terminal)
+{
+    BitwiseMemoryManager mm;
+
+    vector<pair<unsigned, unsigned> > values = boost::assign::list_of<pair<unsigned, unsigned> >(make_pair(1, 2))(make_pair(2, 3))(make_pair(3, 4))(make_pair(4, 5));
+    Array<pair<unsigned, unsigned> > v1(mm, values);
 
     BOOST_CHECK_EQUAL(v1.size(), values.size());
     BOOST_CHECK_EQUAL(v1[0], values[0]);

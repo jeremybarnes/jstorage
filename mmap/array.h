@@ -65,8 +65,12 @@ struct Array {
         typename Serializer::WorkingMetadata metadata
             = Serializer::new_metadata(length_);
 
-        size_t nwords = Serializer::prepare_collection(first, last, metadata);
-        long * mem = mm.allocate(nwords);
+        Serializer::prepare_collection(first, last, metadata);
+
+        size_t child_words = Serializer::words_for_children(metadata);
+        size_t base_words  = Serializer::words_for_base(metadata, length_);
+
+        long * mem = mm.allocate(base_words + child_words);
         mem_ = mem;
 
         metadata_

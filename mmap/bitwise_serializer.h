@@ -49,15 +49,19 @@ struct EncodedUnsignedIntegralSerializer {
 
     static WorkingMetadata new_metadata(size_t length)
     {
-        return Bits();
+        // Maximum size so far is zero
+        return Bits(0);
     }
 
     // Serialize a single value.  The base points to the start of the block
     // of memory for this part of the data structure
     template<typename ValueT>
     static void serialize(long * base,
-                          BitWriter & writer, const ValueT & value,
-                          WorkingMetadata metadata, int object_num)
+                          BitWriter & writer,
+                          const ValueT & value,
+                          WorkingMetadata metadata,
+                          ImmutableMetadata & imd,
+                          int object_num)
     {
         Integral uvalue = Encoder::encode(value);
         writer.write(uvalue, metadata);
@@ -86,21 +90,30 @@ struct EncodedUnsignedIntegralSerializer {
     }
 
     // How many words to allocate to store this in?
-    static size_t words_required(WorkingMetadata metadata, size_t length)
+    static size_t words_for_base(WorkingMetadata metadata, size_t length)
     {
         return BitwiseMemoryManager::words_required(metadata, length);
     }
 
+    // How many words to allocate in an extra buffer for the child data?
+    // Since there are no pointers in this structure (it's all fixed
+    // width), we don't need any
+    static size_t words_for_children(WorkingMetadata metadata)
+    {
+        return 0;
+    }
+
     // How many bits to store a single entry?
-    static Bits bits_per_entry(WorkingMetadata metadata)
+    template<typename Metadata>
+    static Bits bits_per_entry(const Metadata & metadata)
     {
         return metadata;
     }
 
-    // Convert metadata to immutable metadata
-    static ImmutableMetadata to_immutable(WorkingMetadata metadata)
+    static void
+    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        return metadata;
+        imd = md;
     }
 };
 
@@ -202,19 +215,32 @@ struct CollectionSerializer : public BaseT {
     typedef typename BaseT::WorkingMetadata WorkingMetadata;
     typedef typename BaseT::ImmutableMetadata ImmutableMetadata;
 
+    using Base::prepare;
+    using Base::bits_per_entry;
+    using Base::serialize;
+    using Base::reconstitute;
+    using Base::finish_collection;
+
     // Scan a series of entries to figure out how to efficiently serialize
     // them.
     template<typename Iterator>
-    static size_t
+    static void
     prepare_collection(Iterator first, Iterator last,
                        WorkingMetadata & md)
     {
-        int length = last - first;
-
         for (int i = 0; first != last;  ++first, ++i)
-            Base::prepare(*first, md, i);
+            prepare(*first, md, i);
+    }
 
-        return Base::words_required(md, length);
+    static size_t words_for_base(WorkingMetadata & md, size_t length)
+    {
+        return BitwiseMemoryManager::words_required(bits_per_entry(md),
+                                                    length);
+    }
+
+    static Bits get_element_offset(int element, const ImmutableMetadata & md)
+    {
+        return element * bits_per_entry(md);
     }
 
     // Extract entry n out of the total
@@ -222,9 +248,9 @@ struct CollectionSerializer : public BaseT {
     extract_from_collection(const long * mem, int n,
                             ImmutableMetadata md)
     {
-        Bits bit_offset = Base::get_element_offset(n, md);
+        Bits bit_offset = get_element_offset(n, md);
         BitReader reader(mem, bit_offset);
-        return Base::reconstitute(mem, reader, md);
+        return reconstitute(mem, reader, md);
     }
 
     // Serialize a homogeneous collection where each of the elements is of
@@ -237,16 +263,106 @@ struct CollectionSerializer : public BaseT {
     static ImmutableMetadata
     serialize_collection(long * mem,
                          Iterator first, Iterator last,
-                         const WorkingMetadata & md)
+                         WorkingMetadata & md)
     {
         BitWriter writer(mem);
-        for (int i = 0; first != last;  ++first, ++i)
-            Base::serialize(mem, writer, *first, md, i);
 
-        return Base::to_immutable(md);
+        ImmutableMetadata imd;
+
+        for (int i = 0; first != last;  ++first, ++i)
+            serialize(mem, writer, *first, md, imd, i);
+
+        finish_collection(md, imd);
+
+        return imd;
     }
+
 };
 
+template<typename T1, typename T2,
+         class Serializer1T = CollectionSerializer<T1>,
+         class Serializer2T = CollectionSerializer<T2> >
+struct PairSerializer {
+
+    typedef Serializer1T Serializer1;
+    typedef Serializer2T Serializer2;
+
+    typedef typename Serializer1T::WorkingMetadata WorkingMetadata1;
+    typedef typename Serializer2T::WorkingMetadata WorkingMetadata2;
+    typedef typename Serializer1T::ImmutableMetadata ImmutableMetadata1;
+    typedef typename Serializer2T::ImmutableMetadata ImmutableMetadata2;
+
+    typedef std::pair<WorkingMetadata1, WorkingMetadata2>
+    WorkingMetadata;
+    typedef std::pair<ImmutableMetadata1, ImmutableMetadata2>
+    ImmutableMetadata;
+
+    static WorkingMetadata new_metadata(size_t length)
+    {
+        return WorkingMetadata(Serializer1::new_metadata(length),
+                               Serializer2::new_metadata(length));
+    }
+
+    template<typename Value>
+    static void prepare(const Value & value, WorkingMetadata & md, int index)
+    {
+        Serializer1::prepare(value.first, md.first, index);
+        Serializer2::prepare(value.second, md.second, index);
+    }
+
+    static size_t words_for_children(WorkingMetadata & md)
+    {
+        size_t words1 = Serializer1::words_for_children(md.first);
+        size_t words2 = Serializer2::words_for_children(md.second);
+        return words1 + words2;
+    }
+
+    template<typename Metadata>
+    static Bits bits_per_entry(const Metadata & md)
+    {
+        return md.first + md.second;
+    }
+    
+    static std::pair<T1, T2>
+    reconstitute(const long * mem,
+                 BitReader & reader,
+                 const ImmutableMetadata & md)
+    {
+        T1 res1 = Serializer1::reconstitute(mem, reader, md.first);
+        T2 res2 = Serializer1::reconstitute(mem, reader, md.first);
+        return std::make_pair(res1, res2);
+    }
+
+    template<typename ValueT>
+    static void
+    serialize(long * mem, BitWriter & writer, const ValueT & value,
+              WorkingMetadata & md, ImmutableMetadata & imd,
+              int object_num)
+    {
+        Serializer1::serialize(mem, writer, value.first, md.first, imd.first,
+                               object_num);
+        Serializer2::serialize(mem, writer, value.second, md.second,
+                               imd.second, object_num);
+    }
+
+    static void
+    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    {
+        Serializer1::finish_collection(md.first, imd.first);
+        Serializer2::finish_collection(md.second, imd.second);
+    }
+    
+};
+
+/** Default serializer for pairs is PairSerializer */
+template<typename T1, typename T2>
+struct Serializer<std::pair<T1, T2> >
+    : public PairSerializer<T1, T2> {
+};
+
+/*****************************************************************************/
+/* BASEARRAYENTRY                                                            */
+/*****************************************************************************/
 
 template<typename BaseData, typename ChildMetadata>
 struct BaseArrayEntry {
@@ -290,7 +406,7 @@ struct BaseArrayEntry<BaseData, void> {
 template<>
 struct BaseArrayEntry<void, void> {
     BaseArrayEntry()
-        : data(BaseData()), offset(0), length(0), metadata(0)
+        : data(0), offset(0), length(0), metadata(0)
     {
     }
 
@@ -300,7 +416,7 @@ struct BaseArrayEntry<void, void> {
     int metadata;
 };
 
-
+#if 0
 /*****************************************************************************/
 /* BASEANDCOLLECTIONSERIALIZER                                               */
 /*****************************************************************************/
@@ -428,6 +544,7 @@ template<typename BaseSerializer>
 struct BaseAndCollectionSerializer<BaseSerializer, void>
     : public CollectionSerializer<typename BaseSerializer::Value, BaseSerializer> {
 };
+#endif
 
 } // namespace JMVCC
 
