@@ -11,6 +11,7 @@
 #include "jstorage/mmap/bitwise_serializer.h"
 #include "jstorage/mmap/array.h"
 #include "jstorage/mmap/pair.h"
+#include "jstorage/mmap/structure.h"
 //#include "jstorage/mmap/tuple.h"
 
 #include "jml/utils/string_functions.h"
