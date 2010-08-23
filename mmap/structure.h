@@ -103,6 +103,10 @@ struct NullSerializer {
     }
 };
 
+template<>
+struct Serializer<Nothing> : public NullSerializer {
+};
+
 /** Extractor that does nothing for slots that aren't used */
 struct NoExtractor {
     typedef CollectionSerializer<void, NullSerializer> Serializer;
@@ -268,13 +272,13 @@ struct TupleExtractor {
     typedef SerializerT Serializer;
 
     template<typename Tuple>
-    static const Type & extract(const Tuple & tuple)
+    static JML_ALWAYS_INLINE const Type & extract(const Tuple & tuple)
     {
         return tuple.template get<N>();
     }
 
     template<typename T, typename Tuple>
-    static void insert(Tuple & tuple, const T & value)
+    static JML_ALWAYS_INLINE void insert(Tuple & tuple, const T & value)
     {
         tuple.template get<N>() = value;
     }

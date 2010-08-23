@@ -21,7 +21,7 @@ namespace JMVCC {
 
 template<typename T> struct Serializer;
 template<typename T, typename BaseT = Serializer<T> >
- struct CollectionSerializer;
+struct CollectionSerializer;
 
 
 /*****************************************************************************/

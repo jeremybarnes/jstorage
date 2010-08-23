@@ -9,34 +9,40 @@
 #define __jmvcc__string_h__
 
 #include "array.h"
-#include "pair.h"
+#include "structure.h"
 #include <string>
+#include <cstring>
 
 
 namespace JMVCC {
 
-// Data to reconstitute an array element
-template<typename Extra>
-struct ArrayData {
+/** Metadata for a string. */
+struct StringMetadataEntry {
+    StringMetadataEntry()
+        : length(0), offset(0)
+    {
+    }
+    
     unsigned length;
     unsigned offset;
-    Extra extra;
 };
 
+/** How to serialize the metadata for a string. */
 template<>
-struct ArrayData<void> {
-    unsigned length;
-    unsigned offset;
+struct Serializer<StringMetadataEntry>
+    : public StructureSerializer<StringMetadataEntry,
+                                 Extractor<StringMetadataEntry, unsigned,
+                                           &StringMetadataEntry::length>,
+                                 Extractor<StringMetadataEntry, unsigned,
+                                           &StringMetadataEntry::offset> > {
 };
 
-// 
 
 /** Stored null terminated but with a length as well that allows us to
     convert to a normal string efficiently.
 */
 struct String {
-    typedef ArrayData<void> Metadata;
-    String(const long * base, const Metadata & metadata)
+    String(const long * base, const StringMetadataEntry & metadata)
         : length_(metadata.length),
           value_(reinterpret_cast<const char *>(base + metadata.offset))
     {
@@ -55,30 +61,20 @@ private:
     const char * value_;
 };
 
+
 struct StringSerializer {
 
     // How to serialize a string...
     // each element has a length and an offset
-    struct MetadataEntry : public std::pair<unsigned, unsigned> {
-        MetadataEntry()
-            : length(0), offset(0)
-        {
-        }
 
-        unsigned length;
-        unsigned offset;
-    };
-
-    typedef CollectionSerializer<MetadataEntry,
-                                 PairSerializer<unsigned, unsigned> >
-        EntrySerializer;
+    typedef CollectionSerializer<StringMetadataEntry> EntrySerializer;
 
     struct WorkingMetadata {
-        typedef std::vector<MetadataEntry> Entries;
+        typedef std::vector<StringMetadataEntry> Entries;
         Entries entries;
         size_t total_length;
         typename EntrySerializer::WorkingMetadata entries_md;
-
+        
         WorkingMetadata(size_t length)
             : entries(length), total_length(0),
               entries_md(EntrySerializer::new_metadata(length))
@@ -88,10 +84,10 @@ struct StringSerializer {
     };
     
     struct ImmutableMetadata {
-        typedef Array<MetadataEntry> Entries;
+        typedef Array<StringMetadataEntry> Entries;
         Entries entries;  // contains its own metadata
 
-        CollectionSerializer<Array<MetadataEntry> >::ImmutableMetadata
+        CollectionSerializer<Entries>::ImmutableMetadata
             entries_md;
     };
 
@@ -106,53 +102,73 @@ struct StringSerializer {
         // These are stored as null terminated values, one after another
         std::pair<const char *, size_t> info
             = get_info(value);
-        md[index].length = info.second;
+        md.entries[index].length = info.second;
         md.total_length += info.second + 1;
-        if (index != md.length() - 1)
-            md[index].offset = md[index - 1].offset + length + 1;
+        if (index != md.entries.size() - 1)
+            md.entries[index].offset
+                = md.entries[index - 1].offset + info.second + 1;
     }
 
     // How much memory do we need to allocate to store the strings?
     static size_t words_for_children(WorkingMetadata & md)
     {
-        return BitwiseMemoryManager::words_to_cover(md.total_length * 8).first;
+        return BitwiseMemoryManager::
+            words_to_cover(Bits(8 * md.total_length)).first;
     }
 
     template<typename Metadata>
     static Bits bits_per_entry(const Metadata & md)
     {
-        
+        return EntrySerializer::bits_per_entry(md.entries_md);
     }
     
-    static std::pair<T1, T2>
-    reconstitute(const long * mem,
-                 BitReader & reader,
-                 const ImmutableMetadata & md)
+    template<typename Value>
+    static 
+    void serialize(long * mem,
+                   BitWriter & writer,
+                   const Value & value,
+                   WorkingMetadata & md,
+                   ImmutableMetadata & imd,
+                   int index)
     {
-        T1 res1 = Serializer1::reconstitute(mem, reader, md.first);
-        T2 res2 = Serializer1::reconstitute(mem, reader, md.first);
-        return std::make_pair(res1, res2);
+        // Find where the data goes
+        char * write_to
+            = reinterpret_cast<char *>(mem)
+            // + md.data_offset // TODO WE NEED THIS
+            + md.entries[index].offset;
+
+        std::pair<const char *, size_t> info
+            = get_info(value);
+
+        // Write it in place
+        strncpy(write_to, info.first, info.second + 1);
+
+        StringMetadataEntry imde;  // dummy; not needed
+
+        // Now write our entry
+        EntrySerializer::serialize(mem, writer, value, md.entries[index],
+                                   imde, index);
     }
 
-    template<typename ValueT>
-    static void
-    serialize(long * mem, BitWriter & writer, const ValueT & value,
-              WorkingMetadata & md, ImmutableMetadata & imd,
-              int object_num)
+    static String
+    reconstitute(const long * base,
+                 BitReader & reader,
+                 ImmutableMetadata metadata)
     {
-        Serializer1::serialize(mem, writer, value.first, md.first, imd.first,
-                               object_num);
-        Serializer2::serialize(mem, writer, value.second, md.second,
-                               imd.second, object_num);
+        throw ML::Exception("string reconstitute");
+    }
+
+    template<typename Metadata>
+    static size_t bits_per_entry(const Metadata & metadata)
+    {
+        return EntrySerializer::bits_per_entry(metadata.entries_md);
     }
 
     static void
     finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        Serializer1::finish_collection(md.first, imd.first);
-        Serializer2::finish_collection(md.second, imd.second);
+        throw ML::Exception("string finish_collection");
     }
-    
 };
 
 } // namespace JMVCC

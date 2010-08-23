@@ -12,6 +12,7 @@
 #include "jstorage/mmap/array.h"
 #include "jstorage/mmap/pair.h"
 #include "jstorage/mmap/structure.h"
+#include "jstorage/mmap/string.h"
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"
