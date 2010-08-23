@@ -17,6 +17,13 @@
 
 namespace JMVCC {
 
+
+/*****************************************************************************/
+/* STRUCTURE                                                                 */
+/*****************************************************************************/
+
+/** Helper class that builds an extractor to extract a given field from a
+    given structure. */
 template<typename StructureT, typename Type, Type StructureT::* Field,
          class SerializerT = CollectionSerializer<Type> >
 struct Extractor {
@@ -35,6 +42,13 @@ struct Extractor {
     }
 };
 
+
+/*****************************************************************************/
+/* NULL SERIALIZER                                                           */
+/*****************************************************************************/
+
+/** Helper class that contains... nothing.  Used instead of void as void
+    can't be passed around as a value. */
 struct Nothing {
 };
 
@@ -107,6 +121,15 @@ struct NoExtractor {
     }
 };
 
+
+/*****************************************************************************/
+/* STRUCURE SERIALIZER                                                       */
+/*****************************************************************************/
+
+/** A template to build a serializer for a structure with up to 4 members.
+    Each member is specified with an exractor, which gives the serialization
+    type for each and extracts the entry from the structure.
+*/
 template<typename StructureT,
          class Extractor0,
          class Extractor1 = NoExtractor,
