@@ -111,7 +111,7 @@ struct EncodedUnsignedIntegralSerializer {
     }
 
     static void
-    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
     {
         imd = md;
     }
@@ -272,7 +272,7 @@ struct CollectionSerializer : public BaseT {
         for (int i = 0; first != last;  ++first, ++i)
             serialize(mem, writer, *first, md, imd, i);
 
-        finish_collection(md, imd);
+        finish_collection(mem, md, imd);
 
         return imd;
     }

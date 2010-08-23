@@ -284,7 +284,7 @@ struct ArraySerializer {
     }
 
     static void
-    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
     {
         throw ML::Exception("finish_collection");
     }

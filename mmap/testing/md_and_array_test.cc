@@ -259,6 +259,22 @@ BOOST_AUTO_TEST_CASE(test_tuple_terminal)
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
+BOOST_AUTO_TEST_CASE( test_string )
+{
+    BitwiseMemoryManager mm;
+
+    vector<string> values
+        = boost::assign::list_of<string>("hello")("how")("are")("you");
+
+    Array<string> v1(mm, values);
+
+    BOOST_CHECK_EQUAL(v1.size(), values.size());
+    BOOST_CHECK_EQUAL(v1[0], values[0]);
+    BOOST_CHECK_EQUAL(v1[1], values[1]);
+    BOOST_CHECK_EQUAL(v1[2], values[2]);
+    BOOST_CHECK_EQUAL(v1[3], values[3]);
+}
+
 
 #if 0
 

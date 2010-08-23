@@ -56,6 +56,16 @@ struct String {
     size_t length() const { return length_; }
     const char * value() const { return value_; }
 
+    operator std::string() const
+    {
+        return std::string(value_, value_ + length_);
+    }
+    
+    operator const char * () const
+    {
+        return value_;
+    }
+
 private:
     unsigned length_;
     const char * value_;
@@ -86,14 +96,32 @@ struct StringSerializer {
     struct ImmutableMetadata {
         typedef Array<StringMetadataEntry> Entries;
         Entries entries;  // contains its own metadata
-
-        CollectionSerializer<Entries>::ImmutableMetadata
-            entries_md;
     };
 
     static WorkingMetadata new_metadata(size_t length)
     {
         return WorkingMetadata(length);
+    }
+
+    static
+    std::pair<const char *, size_t>
+    get_info(const std::string & str)
+    {
+        return std::make_pair(str.c_str(), str.length());
+    }
+
+    static
+    std::pair<const char *, size_t>
+    get_info(const String & str)
+    {
+        return std::make_pair(str.value(), str.length());
+    }
+
+    static
+    std::pair<const char *, size_t>
+    get_info(const char * str)
+    {
+        return std::make_pair(str, strlen(str));
     }
 
     template<typename Value>
@@ -116,10 +144,14 @@ struct StringSerializer {
             words_to_cover(Bits(8 * md.total_length)).first;
     }
 
-    template<typename Metadata>
-    static Bits bits_per_entry(const Metadata & md)
+    static Bits bits_per_entry(const WorkingMetadata & md)
     {
         return EntrySerializer::bits_per_entry(md.entries_md);
+    }
+    
+    static Bits bits_per_entry(const ImmutableMetadata & md)
+    {
+        return EntrySerializer::bits_per_entry(md.entries.md_.metadata);
     }
     
     template<typename Value>
@@ -143,32 +175,42 @@ struct StringSerializer {
         // Write it in place
         strncpy(write_to, info.first, info.second + 1);
 
-        StringMetadataEntry imde;  // dummy; not needed
-
         // Now write our entry
-        EntrySerializer::serialize(mem, writer, value, md.entries[index],
-                                   imde, index);
+        EntrySerializer::serialize(mem, writer, md.entries[index],
+                                   md.entries_md, imd.entries.md_.metadata,
+                                   index);
     }
 
     static String
     reconstitute(const long * base,
                  BitReader & reader,
-                 ImmutableMetadata metadata)
+                 const ImmutableMetadata & metadata)
     {
-        throw ML::Exception("string reconstitute");
-    }
-
-    template<typename Metadata>
-    static size_t bits_per_entry(const Metadata & metadata)
-    {
-        return EntrySerializer::bits_per_entry(metadata.entries_md);
+        StringMetadataEntry entry = EntrySerializer::
+            reconstitute(base, reader, metadata.entries.md_.metadata);
+        return String(base, entry);
     }
 
     static void
-    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        throw ML::Exception("string finish_collection");
+        EntrySerializer::finish_collection(mem, md.entries_md, imd.entries.md_.metadata);
+        imd.entries.mem_ = mem;
+        imd.entries.md_.length = md.entries.size();
+        imd.entries.md_.offset = 0;
     }
+};
+
+template<>
+struct Serializer<std::string> : public StringSerializer {
+};
+
+template<>
+struct Serializer<String> : public StringSerializer {
+};
+
+template<>
+struct Serializer<const char *> : public StringSerializer {
 };
 
 } // namespace JMVCC

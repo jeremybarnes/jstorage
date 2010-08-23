@@ -98,7 +98,7 @@ struct NullSerializer {
 
     static void
     JML_PURE_FN JML_ALWAYS_INLINE
-    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
     {
     }
 };
@@ -247,15 +247,15 @@ struct StructureSerializer {
     }
 
     static void
-    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        Serializer0::finish_collection(md.template get<0>(),
+        Serializer0::finish_collection(mem, md.template get<0>(),
                                        imd.template get<0>());
-        Serializer1::finish_collection(md.template get<1>(),
+        Serializer1::finish_collection(mem, md.template get<1>(),
                                        imd.template get<1>());
-        Serializer2::finish_collection(md.template get<2>(),
+        Serializer2::finish_collection(mem, md.template get<2>(),
                                        imd.template get<2>());
-        Serializer3::finish_collection(md.template get<3>(),
+        Serializer3::finish_collection(mem, md.template get<3>(),
                                        imd.template get<3>());
     }
 };

@@ -86,10 +86,10 @@ struct PairSerializer {
     }
 
     static void
-    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        Serializer1::finish_collection(md.first, imd.first);
-        Serializer2::finish_collection(md.second, imd.second);
+        Serializer1::finish_collection(mem, md.first, imd.first);
+        Serializer2::finish_collection(mem, md.second, imd.second);
     }
     
 };
