@@ -9,8 +9,10 @@
 #ifndef __jstorage__mmap__structure_h__
 #define __jstorage__mmap__structure_h__
 
+
 #include "bitwise_serializer.h"
 #include <boost/tuple/tuple.hpp>
+#include "jml/compiler/compiler.h"
 
 
 namespace JMVCC {
@@ -40,57 +42,66 @@ struct NullSerializer {
     typedef Nothing WorkingMetadata;
     typedef Nothing ImmutableMetadata;
 
-    static WorkingMetadata new_metadata(unsigned length)
+    static JML_PURE_FN JML_ALWAYS_INLINE
+    Nothing new_metadata(unsigned length)
     {
         return WorkingMetadata();
     }
 
-    static size_t words_for_children(WorkingMetadata)
+    static JML_PURE_FN JML_ALWAYS_INLINE
+    size_t words_for_children(WorkingMetadata)
     {
         return 0;
     }
 
     template<typename Value>
-    static void prepare(Value value, WorkingMetadata & metadata,
+    static JML_PURE_FN JML_ALWAYS_INLINE
+    void prepare(Value value, WorkingMetadata & metadata,
                         int item_number)
     {
     }
 
     template<typename T>
-    static void serialize(long * mem, BitWriter & writer, const T & value,
-                          WorkingMetadata, ImmutableMetadata, int)
+    static JML_PURE_FN JML_ALWAYS_INLINE
+    void serialize(long * mem, BitWriter & writer, const T & value,
+                   WorkingMetadata, ImmutableMetadata, int)
     {
     }
 
-    static Nothing reconstitute(const long * base,
-                                BitReader & reader,
-                                ImmutableMetadata metadata)
+    static JML_PURE_FN JML_ALWAYS_INLINE
+    Nothing reconstitute(const long * base,
+                         BitReader & reader,
+                         ImmutableMetadata metadata)
     {
         return Nothing();
     }
 
-    static size_t bits_per_entry(Nothing)
+    static JML_PURE_FN JML_ALWAYS_INLINE
+    size_t bits_per_entry(Nothing)
     {
         return 0;
     }
 
     static void
+    JML_PURE_FN JML_ALWAYS_INLINE
     finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
     {
     }
 };
 
+/** Extractor that does nothing for slots that aren't used */
 struct NoExtractor {
     typedef CollectionSerializer<void, NullSerializer> Serializer;
 
-
     template<typename StructureT, typename T>
-    static void insert(StructureT & structure, const T & value)
+    static JML_PURE_FN JML_ALWAYS_INLINE void
+    insert(StructureT & structure, const T & value)
     {
     }
 
     template<typename StructureT>
-    static int extract(const StructureT & structure)
+    static JML_PURE_FN JML_ALWAYS_INLINE int
+    extract(const StructureT & structure)
     {
         return 0;
     }
