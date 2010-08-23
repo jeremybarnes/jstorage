@@ -184,6 +184,60 @@ BOOST_AUTO_TEST_CASE(test_pair_of_pairs)
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
+struct Pair {
+    Pair(unsigned first = 0, unsigned second = 0)
+        : first(first), second(second)
+    {
+    }
+
+    unsigned first;
+    unsigned second;
+
+    bool operator == (const Pair & other) const
+    {
+        return first == other.first && second == other.second;
+    }
+};
+
+std::ostream & operator << (std::ostream & stream, const Pair & p)
+{
+    return stream << std::make_pair(p.first, p.second);
+}
+
+Pair make_Pair(unsigned f, unsigned s)
+{
+    return Pair(f, s);
+}
+
+struct PairStructSerializer:
+    public StructureSerializer<Pair,
+                               Extractor<Pair, unsigned, &Pair::first>,
+                               Extractor<Pair, unsigned, &Pair::second> > {
+};
+
+namespace JMVCC {
+
+template<>
+struct Serializer<Pair> : public PairStructSerializer {
+};
+
+} // namespace JMVCC
+
+BOOST_AUTO_TEST_CASE(test_structure_terminal)
+{
+    BitwiseMemoryManager mm;
+
+    vector<Pair> values = boost::assign::list_of<Pair>(make_Pair(1, 2))(make_Pair(2, 3))(make_Pair(3, 4))(make_Pair(4, 5));
+    Array<Pair> v1(mm, values);
+
+    BOOST_CHECK_EQUAL(v1.size(), values.size());
+    BOOST_CHECK_EQUAL(v1[0], values[0]);
+    BOOST_CHECK_EQUAL(v1[1], values[1]);
+    BOOST_CHECK_EQUAL(v1[2], values[2]);
+    BOOST_CHECK_EQUAL(v1[3], values[3]);
+}
+
+
 #if 0
 
 namespace JMVCC {

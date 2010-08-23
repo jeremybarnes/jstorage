@@ -33,11 +33,67 @@ struct Extractor {
     }
 };
 
+struct Nothing {
+};
+
 struct NullSerializer {
+    typedef Nothing WorkingMetadata;
+    typedef Nothing ImmutableMetadata;
+
+    static WorkingMetadata new_metadata(unsigned length)
+    {
+        return WorkingMetadata();
+    }
+
+    static size_t words_for_children(WorkingMetadata)
+    {
+        return 0;
+    }
+
+    template<typename Value>
+    static void prepare(Value value, WorkingMetadata & metadata,
+                        int item_number)
+    {
+    }
+
+    template<typename T>
+    static void serialize(long * mem, BitWriter & writer, const T & value,
+                          WorkingMetadata, ImmutableMetadata, int)
+    {
+    }
+
+    static Nothing reconstitute(const long * base,
+                                BitReader & reader,
+                                ImmutableMetadata metadata)
+    {
+        return Nothing();
+    }
+
+    static size_t bits_per_entry(Nothing)
+    {
+        return 0;
+    }
+
+    static void
+    finish_collection(WorkingMetadata & md, ImmutableMetadata & imd)
+    {
+    }
 };
 
 struct NoExtractor {
-    typedef NullSerializer Serializer;
+    typedef CollectionSerializer<void, NullSerializer> Serializer;
+
+
+    template<typename StructureT, typename T>
+    static void insert(StructureT & structure, const T & value)
+    {
+    }
+
+    template<typename StructureT>
+    static int extract(const StructureT & structure)
+    {
+        return 0;
+    }
 };
 
 template<typename StructureT,
@@ -78,6 +134,7 @@ struct StructureSerializer {
         result.template get<1>() = Serializer1::new_metadata(length);
         result.template get<2>() = Serializer2::new_metadata(length);
         result.template get<3>() = Serializer3::new_metadata(length);
+        return result;
     }
 
     template<typename Value>
@@ -140,13 +197,13 @@ struct StructureSerializer {
         Serializer0::serialize(mem, writer, Extractor0::extract(value),
                                md.template get<0>(), imd.template get<0>(),
                                object_num);
-        Serializer1::serialize(mem, writer, Extractor0::extract(value),
+        Serializer1::serialize(mem, writer, Extractor1::extract(value),
                                md.template get<1>(), imd.template get<1>(),
                                object_num);
-        Serializer2::serialize(mem, writer, Extractor0::extract(value),
+        Serializer2::serialize(mem, writer, Extractor2::extract(value),
                                md.template get<2>(), imd.template get<2>(),
                                object_num);
-        Serializer3::serialize(mem, writer, Extractor0::extract(value),
+        Serializer3::serialize(mem, writer, Extractor3::extract(value),
                                md.template get<3>(), imd.template get<3>(),
                                object_num);
     }
@@ -164,6 +221,7 @@ struct StructureSerializer {
                                        imd.template get<3>());
     }
 };
+
 
 } // namespace JMVCC
 
