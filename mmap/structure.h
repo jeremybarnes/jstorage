@@ -257,6 +257,44 @@ struct StructureSerializer {
 };
 
 
+/*****************************************************************************/
+/* TUPLES                                                                    */
+/*****************************************************************************/
+
+template<typename Type, unsigned N,
+         typename SerializerT = CollectionSerializer<Type> > 
+struct TupleExtractor {
+
+    typedef SerializerT Serializer;
+
+    template<typename Tuple>
+    static const Type & extract(const Tuple & tuple)
+    {
+        return tuple.template get<N>();
+    }
+
+    template<typename T, typename Tuple>
+    static void insert(Tuple & tuple, const T & value)
+    {
+        tuple.template get<N>() = value;
+    }
+};
+
+template<unsigned N,
+         typename SerializerT> 
+struct TupleExtractor<boost::tuples::null_type, N, SerializerT>
+    : public NoExtractor {
+};
+
+template<typename T0, typename T1, typename T2, typename T3>
+struct Serializer<boost::tuple<T0, T1, T2, T3> >
+    : public StructureSerializer<boost::tuple<T0, T1, T2, T3>,
+                                 TupleExtractor<T0, 0>,
+                                 TupleExtractor<T1, 1>,
+                                 TupleExtractor<T2, 2>,
+                                 TupleExtractor<T3, 3> > {
+};
+
 } // namespace JMVCC
 
 #endif /* __jstorage__mmap__structure_h__ */

@@ -12,7 +12,6 @@
 #include "jstorage/mmap/array.h"
 #include "jstorage/mmap/pair.h"
 #include "jstorage/mmap/structure.h"
-//#include "jstorage/mmap/tuple.h"
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"
@@ -27,6 +26,8 @@
 #include "jml/utils/pair_utils.h"
 #include "jml/arch/bit_range_ops.h"
 #include "jml/arch/bitops.h"
+#include <boost/tuple/tuple_comparison.hpp>
+#include <boost/tuple/tuple_io.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/bind.hpp>
 #include <boost/utility/enable_if.hpp>
@@ -230,6 +231,26 @@ BOOST_AUTO_TEST_CASE(test_structure_terminal)
     vector<Pair> values = boost::assign::list_of<Pair>(make_Pair(1, 2))(make_Pair(2, 3))(make_Pair(3, 4))(make_Pair(4, 5));
     Array<Pair> v1(mm, values);
 
+    BOOST_CHECK_EQUAL(v1.size(), values.size());
+    BOOST_CHECK_EQUAL(v1[0], values[0]);
+    BOOST_CHECK_EQUAL(v1[1], values[1]);
+    BOOST_CHECK_EQUAL(v1[2], values[2]);
+    BOOST_CHECK_EQUAL(v1[3], values[3]);
+}
+
+BOOST_AUTO_TEST_CASE(test_tuple_terminal)
+{
+    BitwiseMemoryManager mm;
+
+    typedef boost::tuple<unsigned, unsigned, unsigned> Tuple;
+
+    vector<Tuple> values = boost::assign::list_of<Tuple>
+        (boost::make_tuple(1, 2, 3))
+        (boost::make_tuple(2, 3, 4))
+        (boost::make_tuple(3, 4, 5))
+        (boost::make_tuple(4, 5, 6));
+    Array<Tuple> v1(mm, values);
+    
     BOOST_CHECK_EQUAL(v1.size(), values.size());
     BOOST_CHECK_EQUAL(v1[0], values[0]);
     BOOST_CHECK_EQUAL(v1[1], values[1]);
