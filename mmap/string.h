@@ -13,6 +13,7 @@
 #include <string>
 #include <cstring>
 
+#include "jml/utils/vector_utils.h"
 
 namespace JMVCC {
 
@@ -25,7 +26,18 @@ struct StringMetadataEntry {
     
     unsigned length;
     unsigned offset;
+
+    std::string print() const
+    {
+        return ML::format("(length: %d, offset: %d)", length, offset);
+    }
 };
+
+inline std::ostream &
+operator << (std::ostream & stream, const StringMetadataEntry & entry)
+{
+    return stream << entry.print();
+}
 
 /** How to serialize the metadata for a string. */
 template<>
@@ -131,10 +143,8 @@ struct StringSerializer {
         std::pair<const char *, size_t> info
             = get_info(value);
         md.entries[index].length = info.second;
+        md.entries[index].offset = md.total_length;
         md.total_length += info.second + 1;
-        if (index != md.entries.size() - 1)
-            md.entries[index].offset
-                = md.entries[index - 1].offset + info.second + 1;
     }
 
     // How much memory do we need to allocate to store the strings?
@@ -198,6 +208,10 @@ struct StringSerializer {
         imd.entries.mem_ = mem;
         imd.entries.md_.length = md.entries.size();
         imd.entries.md_.offset = 0;
+
+        using namespace std;
+        cerr << "md.entries = " << md.entries << endl;
+        cerr << "imd = " << imd.entries << endl;
     }
 };
 
