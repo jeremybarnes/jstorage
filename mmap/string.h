@@ -161,7 +161,7 @@ struct StringSerializer {
     
     static Bits bits_per_entry(const ImmutableMetadata & md)
     {
-        return EntrySerializer::bits_per_entry(md.entries.md_.metadata);
+        return EntrySerializer::bits_per_entry(md.entries.data_.metadata);
     }
     
     template<typename Value>
@@ -187,7 +187,7 @@ struct StringSerializer {
 
         // Now write our entry
         EntrySerializer::serialize(mem, writer, md.entries[index],
-                                   md.entries_md, imd.entries.md_.metadata,
+                                   md.entries_md, imd.entries.data_.metadata,
                                    index);
     }
 
@@ -197,17 +197,17 @@ struct StringSerializer {
                  const ImmutableMetadata & metadata)
     {
         StringMetadataEntry entry = EntrySerializer::
-            reconstitute(base, reader, metadata.entries.md_.metadata);
+            reconstitute(base, reader, metadata.entries.data_.metadata);
         return String(base, entry);
     }
 
     static void
     finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        EntrySerializer::finish_collection(mem, md.entries_md, imd.entries.md_.metadata);
+        EntrySerializer::finish_collection(mem, md.entries_md, imd.entries.data_.metadata);
         imd.entries.mem_ = mem;
-        imd.entries.md_.length = md.entries.size();
-        imd.entries.md_.offset = 0;
+        imd.entries.data_.length = md.entries.size();
+        imd.entries.data_.offset = 0;
 
         using namespace std;
         cerr << "md.entries = " << md.entries << endl;

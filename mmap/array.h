@@ -22,15 +22,15 @@ namespace JMVCC {
 
 
 /*****************************************************************************/
-/* ARRAY METADATA                                                            */
+/* ARRAY DATA                                                                */
 /*****************************************************************************/
 
 /** Metadata for an array
 */
 
 template<typename ChildMetadata>
-struct ArrayMetadata {
-    ArrayMetadata()
+struct ArrayData {
+    ArrayData()
         : length(0), offset(0), metadata(ChildMetadata())
     {
     }
@@ -42,17 +42,17 @@ struct ArrayMetadata {
 
 /** How to serialize the metadata for an array. */
 template<typename ChildMetadata>
-struct Serializer<ArrayMetadata<ChildMetadata> >
-    : public StructureSerializer<ArrayMetadata<ChildMetadata> ,
-                                 Extractor<ArrayMetadata<ChildMetadata>,
+struct Serializer<ArrayData<ChildMetadata> >
+    : public StructureSerializer<ArrayData<ChildMetadata> ,
+                                 Extractor<ArrayData<ChildMetadata>,
                                            unsigned,
-                                           &ArrayMetadata<ChildMetadata>::length>,
-                                 Extractor<ArrayMetadata<ChildMetadata>,
+                                           &ArrayData<ChildMetadata>::length>,
+                                 Extractor<ArrayData<ChildMetadata>,
                                            unsigned,
-                                           &ArrayMetadata<ChildMetadata>::offset>,
-                                 Extractor<ArrayMetadata<ChildMetadata>,
+                                           &ArrayData<ChildMetadata>::offset>,
+                                 Extractor<ArrayData<ChildMetadata>,
                                            ChildMetadata,
-                                           &ArrayMetadata<ChildMetadata>::metadata> > {
+                                           &ArrayData<ChildMetadata>::metadata> > {
 };
 
 
@@ -63,10 +63,9 @@ struct Serializer<ArrayMetadata<ChildMetadata> >
 template<typename T, typename EntrySerializerT = CollectionSerializer<T> >
 struct Array {
     typedef EntrySerializerT EntrySerializer;
-    typedef ArrayMetadata<typename EntrySerializer::ImmutableMetadata>
-        Metadata;
+    typedef ArrayData<typename EntrySerializer::ImmutableMetadata> Data;
     
-    Metadata md_;
+    Data data_;
     const long * mem_;
 
     Array()
@@ -74,9 +73,9 @@ struct Array {
     {
     }
 
-    Array(const long * mem, const Metadata & metadata)
+    Array(const long * mem, const Data & data)
     {
-        init(mem, metadata);
+        init(mem, data);
     }
 
     // Create and populate with data from a range
@@ -87,43 +86,43 @@ struct Array {
         init(mm, vec.begin(), vec.end());
     }
 
-    void init(const long * mem, const Metadata & metadata)
+    void init(const long * mem, const Data & data)
     {
-        md_ = metadata;
+        data_ = data;
         mem_ = mem;
     }
 
     template<typename Iterator>
     void init(BitwiseMemoryManager & mm, Iterator first, Iterator last)
     {
-        Metadata md;
-        md_.length = last - first;
-        md_.offset = 0;
+        Data md;
+        data_.length = last - first;
+        data_.offset = 0;
 
         typename EntrySerializer::WorkingMetadata metadata
-            = EntrySerializer::new_metadata(md_.length);
+            = EntrySerializer::new_metadata(data_.length);
 
         EntrySerializer::prepare_collection(first, last, metadata);
 
         size_t child_words = EntrySerializer::words_for_children(metadata);
-        size_t base_words  = EntrySerializer::words_for_base(metadata, md_.length);
+        size_t base_words  = EntrySerializer::words_for_base(metadata, data_.length);
 
         long * mem = mm.allocate(base_words + child_words);
         mem_ = mem;
 
-        md_.metadata
+        data_.metadata
             = EntrySerializer::serialize_collection(mem, first, last, metadata);
     }
 
     size_t size() const
     {
-        return md_.length;
+        return data_.length;
     }
 
     T operator [] (int index) const
     {
-        return EntrySerializer::extract_from_collection(mem_ + md_.offset,
-                                                        index, md_.metadata);
+        return EntrySerializer::extract_from_collection(mem_ + data_.offset,
+                                                        index, data_.metadata);
     }
 
     struct const_iterator
@@ -183,7 +182,7 @@ struct Array {
 
     const_iterator end() const
     {
-        return const_iterator(*this, md_.length);
+        return const_iterator(*this, data_.length);
     }
 };
 
@@ -215,8 +214,8 @@ struct ArraySerializer {
     typedef typename ChildSerializer::WorkingMetadata ChildWorkingMetadata;
     typedef typename ChildSerializer::ImmutableMetadata ChildImmutableMetadata;
 
-    typedef ArrayMetadata<ChildWorkingMetadata> WorkingMetadataEntry;
-    typedef ArrayMetadata<ChildImmutableMetadata> ImmutableMetadataEntry;
+    typedef ArrayData<ChildWorkingMetadata> WorkingMetadataEntry;
+    typedef ArrayData<ChildImmutableMetadata> ImmutableMetadataEntry;
 
     typedef CollectionSerializer<ImmutableMetadataEntry> EntrySerializer;
 
