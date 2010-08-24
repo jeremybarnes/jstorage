@@ -163,7 +163,7 @@ struct StructureSerializer {
     
     static Value
     reconstitute(BitReader & reader,
-                 const long * & child_mem,
+                 const long * child_mem,
                  const ImmutableMetadata & md,
                  size_t length)
     {
