@@ -92,6 +92,11 @@ struct EncodedUnsignedIntegralSerializer {
             = std::max<size_t>(metadata.value(), highest_bit(uvalue, -1) + 1);
     }
 
+    // Any last steps in the preparation?
+    static void finish_prepare(WorkingMetadata & md, size_t length)
+    {
+    }
+
     // How many words to allocate to store this in?
     static size_t words_for_base(WorkingMetadata metadata, size_t length)
     {
@@ -218,6 +223,7 @@ struct CollectionSerializer : public BaseT {
     typedef typename BaseT::ImmutableMetadata ImmutableMetadata;
 
     using Base::prepare;
+    using Base::finish_prepare;
     using Base::bits_per_entry;
     using Base::serialize;
     using Base::reconstitute;
@@ -233,6 +239,8 @@ struct CollectionSerializer : public BaseT {
         size_t length = last - first;
         for (int i = 0; first != last;  ++first, ++i)
             prepare(*first, md, i, length);
+
+        finish_prepare(md, length);
     }
 
     template<typename Metadata>

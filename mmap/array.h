@@ -262,6 +262,11 @@ struct ArraySerializer {
         throw ML::Exception("prepare");
     }
 
+    static void finish_prepare(WorkingMetadata & md, size_t length)
+    {
+        throw ML::Exception("finish_prepare");
+    }
+
     template<typename Value>
     static 
     void serialize(long * child_mem, BitWriter & writer, const Value & value,

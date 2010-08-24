@@ -56,7 +56,7 @@ struct Serializer<StringMetadataEntry>
 struct String {
     String(const long * base, const StringMetadataEntry & metadata)
         : length_(metadata.length),
-          value_(reinterpret_cast<const char *>(base + metadata.offset))
+          value_(reinterpret_cast<const char *>(base) + metadata.offset)
     {
     }
 
@@ -148,6 +148,13 @@ struct StringSerializer {
         md.total_length += info.second + 1;
     }
 
+    static void finish_prepare(WorkingMetadata & md, size_t length)
+    {
+        EntrySerializer::prepare_collection(md.entries.begin(),
+                                            md.entries.end(),
+                                            md.entries_md);
+    }
+
     // How much memory do we need to allocate to store the strings?
     static size_t words_for_children(WorkingMetadata & md)
     {
@@ -184,10 +191,12 @@ struct StringSerializer {
             = get_info(value);
 
         using namespace std;
-        cerr << "writing " << info.first << " to "
+        cerr << "writing " << index << " element \"" << info.first << "\" to "
              << (void *)write_to << " (offset "
              << ((const char *)write_to - (const char *)child_mem)
-             << ")" << endl;
+             << ")"
+             << " base data " << writer.data
+             << " base bit " << writer.bit_ofs << endl;
 
         // Write it in place; we don't use strncpy since we might need to
         // copy nulls over
@@ -210,6 +219,12 @@ struct StringSerializer {
         StringMetadataEntry entry = EntrySerializer::
             reconstitute(reader, child_mem, metadata.entries.data_.metadata,
                          length);
+
+        using namespace std;
+        cerr << "getting string: entry = " << entry << " child_mem = "
+             << child_mem << " base data " << reader.data
+             << " base bit " << reader.bit_ofs << " data " << endl;
+
         return String(child_mem, entry);
     }
 

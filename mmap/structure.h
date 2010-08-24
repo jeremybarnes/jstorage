@@ -136,6 +136,14 @@ struct StructureSerializer {
             + Serializer2::words_for_children(md.template get<2>());
     }
 
+    static void finish_prepare(WorkingMetadata & md, size_t length)
+    {
+        Serializer0::finish_prepare(md.template get<0>(), length);
+        Serializer1::finish_prepare(md.template get<1>(), length);
+        Serializer2::finish_prepare(md.template get<2>(), length);
+        Serializer3::finish_prepare(md.template get<3>(), length);
+    }
+
     static size_t words_for_children(WorkingMetadata & md)
     {
         return md.chofs[3]

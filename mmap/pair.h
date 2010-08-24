@@ -50,6 +50,12 @@ struct PairSerializer {
         Serializer2::prepare(value.second, md.second, index, length);
     }
 
+    static void finish_prepare(WorkingMetadata & md, size_t length)
+    {
+        Serializer1::finish_prepare(md.first, length);
+        Serializer2::finish_prepare(md.second, length);
+    }
+
     static size_t words_for_children(WorkingMetadata & md)
     {
         size_t words1 = Serializer1::words_for_children(md.first);
