@@ -297,8 +297,6 @@ BOOST_AUTO_TEST_CASE(test_tuple_with_string)
     BOOST_CHECK_EQUAL(v1[4], values[4]);
 }
 
-#if 0
-
 namespace JMVCC {
 
 template<typename T1, typename T2>
@@ -345,7 +343,6 @@ BOOST_AUTO_TEST_CASE(test_nested1)
 
     cerr << "v1[3] = " << v1[3] << endl;
 }
-#endif
 
 #if 0
 BOOST_AUTO_TEST_CASE(test_nested2)

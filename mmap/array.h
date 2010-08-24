@@ -257,7 +257,7 @@ struct ArraySerializer {
     template<typename Value>
     static 
     void prepare(Value value, WorkingMetadata & metadata,
-                 int item_number)
+                 int item_number, size_t length)
     {
         throw ML::Exception("prepare");
     }
@@ -269,28 +269,32 @@ struct ArraySerializer {
 
     template<typename Value>
     static 
-    void serialize(long * child_mem, BitWriter & writer, const Value & value,
-                   WorkingMetadata, ImmutableMetadata, int)
+    void serialize(BitWriter & writer, long * child_mem, const Value & value,
+                   WorkingMetadata, ImmutableMetadata, int index,
+                   size_t length)
     {
         throw ML::Exception("SERIALIZE");
     }
 
     static Value
-    reconstitute(const long * base,
-                 BitReader & reader,
-                 ImmutableMetadata metadata,
+    reconstitute(BitReader & reader,
+                 const long * child_data,
+                 const ImmutableMetadata & metadata,
                  size_t length)
     {
+        throw ML::Exception("reconstitute");
     }
 
     template<typename Metadata>
-    static size_t bits_per_entry(const Metadata & metadata)
+    static Bits bits_per_entry(const Metadata & metadata)
     {
         throw ML::Exception("bits_per_entry");
     }
 
     static void
-    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, long * child_mem,
+                      WorkingMetadata & md, ImmutableMetadata & imd,
+                      size_t length)
     {
         throw ML::Exception("finish_collection");
     }
