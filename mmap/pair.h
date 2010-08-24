@@ -43,10 +43,11 @@ struct PairSerializer {
     }
 
     template<typename Value>
-    static void prepare(const Value & value, WorkingMetadata & md, int index)
+    static void prepare(const Value & value, WorkingMetadata & md, int index,
+                        size_t length)
     {
-        Serializer1::prepare(value.first, md.first, index);
-        Serializer2::prepare(value.second, md.second, index);
+        Serializer1::prepare(value.first, md.first, index, length);
+        Serializer2::prepare(value.second, md.second, index, length);
     }
 
     static size_t words_for_children(WorkingMetadata & md)
@@ -72,7 +73,7 @@ struct PairSerializer {
         T1 res1 = Serializer1::reconstitute(reader, child_mem, md.first,
                                             length);
         
-        size_t offset = Serializer1::words_for_base(md.first, length);
+        size_t offset = Serializer1::words_for_children(md.first);
 
         T2 res2 = Serializer2::reconstitute(reader, child_mem + offset,
                                             md.second, length);
@@ -88,7 +89,7 @@ struct PairSerializer {
         Serializer1::serialize(writer, child_mem,
                                value.first, md.first, imd.first,
                                object_num, length);
-        size_t offset = Serializer1::words_for_base(md.first, length);
+        size_t offset = Serializer1::words_for_children(md.first);
         Serializer2::serialize(writer, child_mem + offset,
                                value.second, md.second,
                                imd.second, object_num, length);
@@ -101,7 +102,7 @@ struct PairSerializer {
     {
         Serializer1::finish_collection(mem, child_mem, md.first, imd.first,
                                        length);
-        size_t offset = Serializer1::words_for_base(md.first, length);
+        size_t offset = Serializer1::words_for_children(md.first);
         Serializer2::finish_collection(mem, child_mem + offset,
                                        md.second, imd.second,
                                        length);

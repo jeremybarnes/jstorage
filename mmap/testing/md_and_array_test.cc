@@ -187,7 +187,6 @@ BOOST_AUTO_TEST_CASE(test_pair_of_pairs)
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
-#if 0
 struct Pair {
     Pair(unsigned first = 0, unsigned second = 0)
         : first(first), second(second)
@@ -240,6 +239,8 @@ BOOST_AUTO_TEST_CASE(test_structure_terminal)
     BOOST_CHECK_EQUAL(v1[2], values[2]);
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
+
+#if 0
 
 BOOST_AUTO_TEST_CASE(test_tuple_terminal)
 {

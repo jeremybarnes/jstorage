@@ -85,7 +85,7 @@ struct EncodedUnsignedIntegralSerializer {
 
     // Scan a single item, updating the metadata
     static void prepare(Value value, WorkingMetadata & metadata,
-                        int item_number)
+                        int item_number, size_t length)
     {
         Integral uvalue = Encoder::encode(value);
         metadata.value()
@@ -99,8 +99,6 @@ struct EncodedUnsignedIntegralSerializer {
     }
 
     // How many words to allocate in an extra buffer for the child data?
-    // Since there are no pointers in this structure (it's all fixed
-    // width), we don't need any
     static size_t words_for_children(WorkingMetadata metadata)
     {
         return 0;
@@ -232,12 +230,14 @@ struct CollectionSerializer : public BaseT {
     prepare_collection(Iterator first, Iterator last,
                        WorkingMetadata & md)
     {
+        size_t length = last - first;
         for (int i = 0; first != last;  ++first, ++i)
-            prepare(*first, md, i);
+            prepare(*first, md, i, length);
     }
 
+    template<typename Metadata>
     static JML_PURE_FN size_t
-    words_for_base(const WorkingMetadata & md, size_t length)
+    words_for_base(const Metadata & md, size_t length)
     {
         return BitwiseMemoryManager::words_required(bits_per_entry(md),
                                                     length);
