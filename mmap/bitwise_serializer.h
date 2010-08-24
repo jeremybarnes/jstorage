@@ -56,12 +56,13 @@ struct EncodedUnsignedIntegralSerializer {
     // Serialize a single value.  The base points to the start of the block
     // of memory for the child of the data structure
     template<typename ValueT>
-    static void serialize(long * child_mem,
-                          BitWriter & writer,
+    static void serialize(BitWriter & writer,
+                          long * child_mem,
                           const ValueT & value,
                           WorkingMetadata metadata,
                           ImmutableMetadata & imd,
-                          int object_num)
+                          int object_num,
+                          size_t length)
     {
         Integral uvalue = Encoder::encode(value);
         writer.write(uvalue, metadata);
@@ -69,8 +70,9 @@ struct EncodedUnsignedIntegralSerializer {
 
     // Reconstitute a single object, given metadata
     static Value reconstitute(BitReader & reader,
-                              const long * & child_mem,
-                              ImmutableMetadata metadata)
+                              const long * child_mem,
+                              ImmutableMetadata metadata,
+                              size_t length)
     {
         return Encoder::decode(reader.read(metadata));
     }
@@ -112,7 +114,8 @@ struct EncodedUnsignedIntegralSerializer {
 
     static void
     finish_collection(long * mem, long * child_mem,
-                      WorkingMetadata & md, ImmutableMetadata & imd)
+                      WorkingMetadata & md, ImmutableMetadata & imd,
+                      size_t length)
     {
         imd = md;
     }
@@ -234,7 +237,7 @@ struct CollectionSerializer : public BaseT {
     }
 
     static JML_PURE_FN size_t
-    words_for_base(WorkingMetadata & md, size_t length)
+    words_for_base(const WorkingMetadata & md, size_t length)
     {
         return BitwiseMemoryManager::words_required(bits_per_entry(md),
                                                     length);
@@ -255,7 +258,7 @@ struct CollectionSerializer : public BaseT {
         Bits bit_offset = get_element_offset(n, md);
         BitReader reader(mem, bit_offset);
         const long * child_mem = mem + words_for_base(md, length);
-        return reconstitute(reader, child_mem, md);
+        return reconstitute(reader, child_mem, md, length);
     }
 
     // Serialize a homogeneous collection where each of the elements is of
@@ -279,9 +282,9 @@ struct CollectionSerializer : public BaseT {
         long * child_mem = mem + words_for_base(md, length);
 
         for (int i = 0; first != last;  ++first, ++i)
-            serialize(child_mem, writer, *first, md, imd, i);
+            serialize(writer, child_mem, *first, md, imd, i, length);
 
-        finish_collection(mem, child_mem, md, imd);
+        finish_collection(mem, child_mem, md, imd, length);
 
         return imd;
     }

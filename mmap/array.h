@@ -273,7 +273,8 @@ struct ArraySerializer {
     static Value
     reconstitute(const long * base,
                  BitReader & reader,
-                 ImmutableMetadata metadata)
+                 ImmutableMetadata metadata,
+                 size_t length)
     {
     }
 

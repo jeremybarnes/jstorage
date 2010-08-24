@@ -64,32 +64,47 @@ struct PairSerializer {
     }
     
     static std::pair<T1, T2>
-    reconstitute(const long * mem,
-                 BitReader & reader,
-                 const ImmutableMetadata & md)
+    reconstitute(BitReader & reader,
+                 const long * child_mem,
+                 const ImmutableMetadata & md,
+                 size_t length)
     {
-        T1 res1 = Serializer1::reconstitute(mem, reader, md.first);
-        T2 res2 = Serializer2::reconstitute(mem, reader, md.second);
+        T1 res1 = Serializer1::reconstitute(reader, child_mem, md.first,
+                                            length);
+        
+        size_t offset = Serializer1::words_for_base(md.first, length);
+
+        T2 res2 = Serializer2::reconstitute(reader, child_mem + offset,
+                                            md.second, length);
         return std::make_pair(res1, res2);
     }
 
     template<typename ValueT>
     static void
-    serialize(long * mem, BitWriter & writer, const ValueT & value,
+    serialize(BitWriter & writer, long * child_mem, const ValueT & value,
               WorkingMetadata & md, ImmutableMetadata & imd,
-              int object_num)
+              int object_num, size_t length)
     {
-        Serializer1::serialize(mem, writer, value.first, md.first, imd.first,
-                               object_num);
-        Serializer2::serialize(mem, writer, value.second, md.second,
-                               imd.second, object_num);
+        Serializer1::serialize(writer, child_mem,
+                               value.first, md.first, imd.first,
+                               object_num, length);
+        size_t offset = Serializer1::words_for_base(md.first, length);
+        Serializer2::serialize(writer, child_mem + offset,
+                               value.second, md.second,
+                               imd.second, object_num, length);
     }
 
     static void
-    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, long * child_mem,
+                      WorkingMetadata & md, ImmutableMetadata & imd,
+                      size_t length)
     {
-        Serializer1::finish_collection(mem, md.first, imd.first);
-        Serializer2::finish_collection(mem, md.second, imd.second);
+        Serializer1::finish_collection(mem, child_mem, md.first, imd.first,
+                                       length);
+        size_t offset = Serializer1::words_for_base(md.first, length);
+        Serializer2::finish_collection(mem, child_mem + offset,
+                                       md.second, imd.second,
+                                       length);
     }
     
 };
