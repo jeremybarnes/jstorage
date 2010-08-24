@@ -22,60 +22,26 @@ namespace JMVCC {
 
 
 /*****************************************************************************/
-/* ARRAY DATA                                                                */
-/*****************************************************************************/
-
-/** Metadata for an array
-*/
-
-template<typename ChildMetadata>
-struct ArrayData {
-    ArrayData()
-        : length(0), offset(0), metadata(ChildMetadata())
-    {
-    }
-
-    unsigned length;
-    unsigned offset;
-    ChildMetadata metadata;
-};
-
-/** How to serialize the metadata for an array. */
-template<typename ChildMetadata>
-struct Serializer<ArrayData<ChildMetadata> >
-    : public StructureSerializer<ArrayData<ChildMetadata> ,
-                                 Extractor<ArrayData<ChildMetadata>,
-                                           unsigned,
-                                           &ArrayData<ChildMetadata>::length>,
-                                 Extractor<ArrayData<ChildMetadata>,
-                                           unsigned,
-                                           &ArrayData<ChildMetadata>::offset>,
-                                 Extractor<ArrayData<ChildMetadata>,
-                                           ChildMetadata,
-                                           &ArrayData<ChildMetadata>::metadata> > {
-};
-
-
-/*****************************************************************************/
 /* ARRAY                                                                     */
 /*****************************************************************************/
 
 template<typename T, typename EntrySerializerT = CollectionSerializer<T> >
 struct Array {
     typedef EntrySerializerT EntrySerializer;
-    typedef ArrayData<typename EntrySerializer::ImmutableMetadata> Data;
+    typedef typename EntrySerializer::ImmutableMetadata ChildMetadata;
     
-    Data data_;
     const long * mem_;
+    size_t length_;
+    ChildMetadata metadata_;
 
     Array()
         : mem_(0)
     {
     }
 
-    Array(const long * mem, const Data & data)
+    Array(const long * mem, size_t length, const ChildMetadata & metadata)
     {
-        init(mem, data);
+        init(mem, length, metadata);
     }
 
     // Create and populate with data from a range
@@ -86,44 +52,42 @@ struct Array {
         init(mm, vec.begin(), vec.end());
     }
 
-    void init(const long * mem, const Data & data)
+    void init(const long * mem, size_t length, const ChildMetadata & metadata)
     {
-        data_ = data;
         mem_ = mem;
+        length_ = length;
+        metadata_ = metadata;
     }
 
     template<typename Iterator>
     void init(BitwiseMemoryManager & mm, Iterator first, Iterator last)
     {
-        Data md;
-        data_.length = last - first;
-        data_.offset = 0;
+        length_ = last - first;
 
         typename EntrySerializer::WorkingMetadata metadata
-            = EntrySerializer::new_metadata(data_.length);
+            = EntrySerializer::new_metadata(length_);
 
         EntrySerializer::prepare_collection(first, last, metadata);
 
         size_t child_words = EntrySerializer::words_for_children(metadata);
-        size_t base_words  = EntrySerializer::words_for_base(metadata, data_.length);
+        size_t base_words  = EntrySerializer::words_for_base(metadata, length_);
 
         long * mem = mm.allocate(base_words + child_words);
         mem_ = mem;
 
-        data_.metadata
+        metadata_
             = EntrySerializer::serialize_collection(mem, first, last, metadata);
     }
 
     size_t size() const
     {
-        return data_.length;
+        return length_;
     }
 
     T operator [] (int index) const
     {
-        return EntrySerializer::extract_from_collection(mem_ + data_.offset,
-                                                        index, data_.metadata,
-                                                        data_.length);
+        return EntrySerializer::
+            extract_from_collection(mem_, index, metadata_, length_);
     }
 
     struct const_iterator
@@ -183,7 +147,7 @@ struct Array {
 
     const_iterator end() const
     {
-        return const_iterator(*this, data_.length);
+        return const_iterator(*this, length_);
     }
 };
 
@@ -196,6 +160,41 @@ std::ostream & operator << (std::ostream & stream, const Array<T> & vec)
     }
     return stream << "]";
 }
+
+
+/*****************************************************************************/
+/* ARRAY METADATA ENTRY                                                      */
+/*****************************************************************************/
+
+/** Metadata entry for an array.
+*/
+
+template<typename ChildMetadata>
+struct ArrayMetadataEntry {
+    ArrayMetadataEntry()
+        : length(0), offset(0), metadata(ChildMetadata())
+    {
+    }
+
+    unsigned length;
+    unsigned offset;
+    ChildMetadata metadata;
+};
+
+/** How to serialize the metadata for an array. */
+template<typename ChildMetadata>
+struct Serializer<ArrayMetadataEntry<ChildMetadata> >
+    : public StructureSerializer<ArrayMetadataEntry<ChildMetadata> ,
+                                 Extractor<ArrayMetadataEntry<ChildMetadata>,
+                                           unsigned,
+                                           &ArrayMetadataEntry<ChildMetadata>::length>,
+                                 Extractor<ArrayMetadataEntry<ChildMetadata>,
+                                           unsigned,
+                                           &ArrayMetadataEntry<ChildMetadata>::offset>,
+                                 Extractor<ArrayMetadataEntry<ChildMetadata>,
+                                           ChildMetadata,
+                                           &ArrayMetadataEntry<ChildMetadata>::metadata> > {
+};
 
 
 /*****************************************************************************/
@@ -215,8 +214,8 @@ struct ArraySerializer {
     typedef typename ChildSerializer::WorkingMetadata ChildWorkingMetadata;
     typedef typename ChildSerializer::ImmutableMetadata ChildImmutableMetadata;
 
-    typedef ArrayData<ChildWorkingMetadata> WorkingMetadataEntry;
-    typedef ArrayData<ChildImmutableMetadata> ImmutableMetadataEntry;
+    typedef ArrayMetadataEntry<ChildWorkingMetadata> WorkingMetadataEntry;
+    typedef ArrayMetadataEntry<ChildImmutableMetadata> ImmutableMetadataEntry;
 
     typedef CollectionSerializer<ImmutableMetadataEntry> EntrySerializer;
 
@@ -301,7 +300,7 @@ struct ArraySerializer {
         // Serialize the entry for this metadata
         EntrySerializer::serialize(writer, 0 /* child_mem */,
                                    wmd.entries[index], wmd.entries_md,
-                                   imd.entries.data_.metadata, index, length);
+                                   imd.entries.metadata_, index, length);
     }
 
     static Value
@@ -312,15 +311,10 @@ struct ArraySerializer {
     {
         ImmutableMetadataEntry entry = EntrySerializer::
             reconstitute(reader, 0 /* child_mem */,
-                         metadata.entries.data_.metadata,
+                         metadata.entries.metadata_,
                          length);
 
-        typename Value::Data data;
-        data.length = entry.length;
-        data.offset = entry.offset;
-        data.metadata = entry.metadata;
-
-        Value result(child_mem, data);
+        Value result(child_mem + entry.offset, entry.length, entry.metadata);
         return result;
     }
 
@@ -331,7 +325,7 @@ struct ArraySerializer {
 
     static Bits bits_per_entry(const ImmutableMetadata & metadata)
     {
-        return EntrySerializer::bits_per_entry(metadata.entries.data_.metadata);
+        return EntrySerializer::bits_per_entry(metadata.entries.metadata_);
     }
 
     static void
@@ -341,11 +335,10 @@ struct ArraySerializer {
     {
         EntrySerializer::finish_collection(mem, 0 /* child_mem */,
                                            wmd.entries_md,
-                                           imd.entries.data_.metadata,
+                                           imd.entries.metadata_,
                                            length);
         imd.entries.mem_ = mem;
-        imd.entries.data_.length = wmd.entries.size();
-        imd.entries.data_.offset = 0;
+        imd.entries.length_ = wmd.entries.size();
         imd.total_child_words = wmd.total_child_words;
     }
 };
