@@ -137,7 +137,8 @@ struct StringSerializer {
     }
 
     template<typename Value>
-    static void prepare(const Value & value, WorkingMetadata & md, int index)
+    static void prepare(const Value & value, WorkingMetadata & md, int index,
+                        size_t length)
     {
         // These are stored as null terminated values, one after another
         std::pair<const char *, size_t> info
@@ -166,12 +167,13 @@ struct StringSerializer {
     
     template<typename Value>
     static 
-    void serialize(long * child_mem,
-                   BitWriter & writer,
+    void serialize(BitWriter & writer,
+                   long * child_mem,
                    const Value & value,
                    WorkingMetadata & md,
                    ImmutableMetadata & imd,
-                   int index)
+                   int index,
+                   size_t length)
     {
         // Find where the data goes
         char * write_to
@@ -193,29 +195,33 @@ struct StringSerializer {
         write_to[info.second] = 0;
 
         // Now write our entry
-        EntrySerializer::serialize(0 /* child_mem */, writer,
+        EntrySerializer::serialize(writer, 0 /* child_mem */,
                                    md.entries[index],
                                    md.entries_md, imd.entries.data_.metadata,
-                                   index);
+                                   index, length);
     }
 
     static String
-    reconstitute(const long * base,
-                 BitReader & reader,
-                 const ImmutableMetadata & metadata)
+    reconstitute(BitReader & reader,
+                 const long * child_mem,
+                 const ImmutableMetadata & metadata,
+                 size_t length)
     {
         StringMetadataEntry entry = EntrySerializer::
-            reconstitute(base, reader, metadata.entries.data_.metadata);
-        return String(base, entry);
+            reconstitute(reader, child_mem, metadata.entries.data_.metadata,
+                         length);
+        return String(child_mem, entry);
     }
 
     static void
     finish_collection(long * mem, long * child_mem,
-                      WorkingMetadata & md, ImmutableMetadata & imd)
+                      WorkingMetadata & md, ImmutableMetadata & imd,
+                      size_t length)
     {
         EntrySerializer::finish_collection(mem, 0 /* child_mem */,
                                            md.entries_md,
-                                           imd.entries.data_.metadata);
+                                           imd.entries.data_.metadata,
+                                           length);
         imd.entries.mem_ = mem;
         imd.entries.data_.length = md.entries.size();
         imd.entries.data_.offset = 0;
