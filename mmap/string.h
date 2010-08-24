@@ -73,10 +73,12 @@ struct String {
         return std::string(value_, value_ + length_);
     }
     
+#if 0
     operator const char * () const
     {
         return value_;
     }
+#endif
 
 private:
     unsigned length_;
@@ -97,7 +99,7 @@ struct StringSerializer {
         size_t total_length;
         typename EntrySerializer::WorkingMetadata entries_md;
         
-        WorkingMetadata(size_t length)
+        WorkingMetadata(size_t length = 0)
             : entries(length), total_length(0),
               entries_md(EntrySerializer::new_metadata(length))
         {
@@ -108,6 +110,7 @@ struct StringSerializer {
     struct ImmutableMetadata {
         typedef Array<StringMetadataEntry> Entries;
         Entries entries;  // contains its own metadata
+        unsigned total_length;
     };
 
     static WorkingMetadata new_metadata(size_t length)
@@ -156,7 +159,14 @@ struct StringSerializer {
     }
 
     // How much memory do we need to allocate to store the strings?
-    static size_t words_for_children(WorkingMetadata & md)
+    static size_t words_for_children(const WorkingMetadata & md)
+    {
+        return BitwiseMemoryManager::
+            words_to_cover(Bits(8 * md.total_length)).first;
+    }
+
+    // How much memory do we need to allocate to store the strings?
+    static size_t words_for_children(const ImmutableMetadata md)
     {
         return BitwiseMemoryManager::
             words_to_cover(Bits(8 * md.total_length)).first;
@@ -240,6 +250,7 @@ struct StringSerializer {
         imd.entries.mem_ = mem;
         imd.entries.data_.length = md.entries.size();
         imd.entries.data_.offset = 0;
+        imd.total_length = md.total_length;
 
         using namespace std;
         cerr << "md.entries = " << md.entries << endl;

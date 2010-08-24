@@ -274,6 +274,29 @@ BOOST_AUTO_TEST_CASE( test_string )
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
+BOOST_AUTO_TEST_CASE(test_tuple_with_string)
+{
+    BitwiseMemoryManager mm;
+
+    typedef boost::tuple<unsigned, std::string, unsigned> Tuple;
+
+    vector<Tuple> values = boost::assign::list_of<Tuple>
+        (boost::make_tuple(1, "hello!", 3))
+        (boost::make_tuple(2, "how@", 4))
+        (boost::make_tuple(3, "are#", 5))
+        (boost::make_tuple(4, "you$", 6))
+        (boost::make_tuple(5, "today?", 7));
+
+    Array<Tuple> v1(mm, values);
+    
+    BOOST_CHECK_EQUAL(v1.size(), values.size());
+    BOOST_CHECK_EQUAL(v1[0], values[0]);
+    BOOST_CHECK_EQUAL(v1[1], values[1]);
+    BOOST_CHECK_EQUAL(v1[2], values[2]);
+    BOOST_CHECK_EQUAL(v1[3], values[3]);
+    BOOST_CHECK_EQUAL(v1[4], values[4]);
+}
+
 #if 0
 
 namespace JMVCC {
