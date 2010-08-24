@@ -181,6 +181,16 @@ struct ArrayMetadataEntry {
     ChildMetadata metadata;
 };
 
+template<typename ChildMetadata>
+std::ostream &
+operator << (std::ostream & stream, ArrayMetadataEntry<ChildMetadata> entry)
+{
+    return stream << "(length: " << entry.length
+                  << ", offset: " << entry.offset
+                  << ", metadata: " << entry.metadata << ")";
+}
+                            
+
 /** How to serialize the metadata for an array. */
 template<typename ChildMetadata>
 struct Serializer<ArrayMetadataEntry<ChildMetadata> >
@@ -260,8 +270,20 @@ struct ArraySerializer {
         ChildSerializer::
             prepare_collection(value.begin(), value.end(),
                                metadata.entries[item_number].metadata);
-        size_t child_words = ChildSerializer::
+
+        size_t child_base_words = ChildSerializer::
+            words_for_base(metadata.entries[item_number].metadata,
+                           length);
+
+        size_t child_child_words = ChildSerializer::
             words_for_children(metadata.entries[item_number].metadata);
+
+        size_t child_words = child_base_words + child_child_words;
+
+        using namespace std;
+        cerr << "child " << item_number << " = " << value << " child_words = "
+             << child_words << " child metadata = "
+             << metadata.entries[item_number].metadata << endl;
 
         metadata.entries[item_number].offset = metadata.total_child_words;
         metadata.entries[item_number].length = value.size();
@@ -274,7 +296,13 @@ struct ArraySerializer {
         EntrySerializer::
             prepare_collection(md.entries.begin(), md.entries.end(),
                                md.entries_md);
-        
+ 
+        using namespace std;
+        cerr << "array: total_child_words = " << md.total_child_words
+             << endl;
+        cerr << "array: metadata.entries = " << md.entries
+             << endl;
+       
         size_t md_child_words = EntrySerializer::
             words_for_children(md.entries_md);
         

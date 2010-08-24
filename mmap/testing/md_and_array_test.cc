@@ -49,92 +49,11 @@ using namespace ML;
 using namespace JMVCC;
 
 
-#if 0
-/*****************************************************************************/
-/* ARRAYANDMETADATA                                                          */
-/*****************************************************************************/
-
-template<typename ElementT, typename MetadataT,
-         typename ArraySerializerT = CollectionSerializer<ElementT>,
-         typename MetadataSerializerT = Serializer<MetadataT> >
-class ArrayAndMetadata {
-    typedef MetadataT Metadata;
-    typedef ElementT Element;
-
-    typedef ArraySerializerT ArraySerializer;
-    typedef MetadataSerializerT MetadataSerializer;
-    typedef typename MetadataSerializer::ImmutableMetadata ElementMetadata;
-
-    size_t length_;
-    size_t offset_;
-    Metadata metadata_;
-    ElementMetadata element_metadata_;
-
-public:
-
-    size_t size() const { return length_; }
-
-    ElementT extract(int element, const long * mem) const
-    {
-    }
-
-    ArrayAndMetadata(size_t length, size_t offset,
-                     Metadata metadata,
-                     ElementMetadata element_metadata)
-    {
-    }
-
-#if 0
-    {
-        init(length, mem, metadata);
-    }
-#endif
-
-#if 0
-    // Create and populate with data from a range
-    template<typename T2>
-    Vector(BitwiseMemoryManager & mm, const std::vector<T2> & vec)
-    {
-        init(mm, vec.begin(), vec.end());
-    }
-#endif
-
-    void init(size_t length, const long * mem,
-              MetadataT metadata,
-              ChildMetadata child_m)
-    {
-        length_ = length;
-        mem_ = mem;
-        metadata_ = metadata;
-    }
-
-    template<typename Iterator>
-    void init(BitwiseMemoryManager & mm, Iterator first, Iterator last)
-    {
-        length_ = last - first;
-        typename Serializer::WorkingMetadata metadata
-            = Serializer::new_metadata(length_);
-
-        size_t nwords = Serializer::prepare(first, last, metadata);
-        long * mem = mm.allocate(nwords);
-        mem_ = mem;
-
-        metadata_
-            = Serializer::serialize_collection(mem, first, last, metadata);
-    }
-
-    T operator [] (int index) const
-    {
-        return Serializer::extract(mem_, index, child_metadata_);
-    }
-
-};
-#endif
-
-
 /*****************************************************************************/
 /* TEST CASES                                                                */
 /*****************************************************************************/
+
+#if 0
 
 // Two cases:
 // 1.  Root case: the metadata object is actually present
@@ -296,6 +215,8 @@ BOOST_AUTO_TEST_CASE(test_tuple_with_string)
     BOOST_CHECK_EQUAL(v1[3], values[3]);
     BOOST_CHECK_EQUAL(v1[4], values[4]);
 }
+
+#endif
 
 namespace JMVCC {
 
