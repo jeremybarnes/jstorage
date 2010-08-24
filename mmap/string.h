@@ -166,7 +166,7 @@ struct StringSerializer {
     
     template<typename Value>
     static 
-    void serialize(long * mem,
+    void serialize(long * child_mem,
                    BitWriter & writer,
                    const Value & value,
                    WorkingMetadata & md,
@@ -175,18 +175,26 @@ struct StringSerializer {
     {
         // Find where the data goes
         char * write_to
-            = reinterpret_cast<char *>(mem)
-            // + md.data_offset // TODO WE NEED THIS
+            = reinterpret_cast<char *>(child_mem)
             + md.entries[index].offset;
 
         std::pair<const char *, size_t> info
             = get_info(value);
 
-        // Write it in place
-        strncpy(write_to, info.first, info.second + 1);
+        using namespace std;
+        cerr << "writing " << info.first << " to "
+             << (void *)write_to << " (offset "
+             << ((const char *)write_to - (const char *)child_mem)
+             << ")" << endl;
+
+        // Write it in place; we don't use strncpy since we might need to
+        // copy nulls over
+        std::copy(info.first, info.first + info.second, write_to);
+        write_to[info.second] = 0;
 
         // Now write our entry
-        EntrySerializer::serialize(mem, writer, md.entries[index],
+        EntrySerializer::serialize(0 /* child_mem */, writer,
+                                   md.entries[index],
                                    md.entries_md, imd.entries.data_.metadata,
                                    index);
     }
@@ -202,9 +210,12 @@ struct StringSerializer {
     }
 
     static void
-    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, long * child_mem,
+                      WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        EntrySerializer::finish_collection(mem, md.entries_md, imd.entries.data_.metadata);
+        EntrySerializer::finish_collection(mem, 0 /* child_mem */,
+                                           md.entries_md,
+                                           imd.entries.data_.metadata);
         imd.entries.mem_ = mem;
         imd.entries.data_.length = md.entries.size();
         imd.entries.data_.offset = 0;

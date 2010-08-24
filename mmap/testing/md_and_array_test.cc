@@ -10,9 +10,11 @@
 #include "jstorage/mmap/bitwise_memory_manager.h"
 #include "jstorage/mmap/bitwise_serializer.h"
 #include "jstorage/mmap/array.h"
+#if 0
 #include "jstorage/mmap/pair.h"
 #include "jstorage/mmap/structure.h"
 #include "jstorage/mmap/string.h"
+#endif
 
 #include "jml/utils/string_functions.h"
 #include "jml/arch/exception.h"
@@ -154,7 +156,7 @@ BOOST_AUTO_TEST_CASE( test_non_nested )
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
 
-
+#if 0
 BOOST_AUTO_TEST_CASE(test_pair_terminal)
 {
     BitwiseMemoryManager mm;
@@ -274,7 +276,7 @@ BOOST_AUTO_TEST_CASE( test_string )
     BOOST_CHECK_EQUAL(v1[2], values[2]);
     BOOST_CHECK_EQUAL(v1[3], values[3]);
 }
-
+#endif
 
 #if 0
 

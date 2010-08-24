@@ -54,9 +54,9 @@ struct EncodedUnsignedIntegralSerializer {
     }
 
     // Serialize a single value.  The base points to the start of the block
-    // of memory for this part of the data structure
+    // of memory for the child of the data structure
     template<typename ValueT>
-    static void serialize(long * base,
+    static void serialize(long * child_mem,
                           BitWriter & writer,
                           const ValueT & value,
                           WorkingMetadata metadata,
@@ -68,8 +68,9 @@ struct EncodedUnsignedIntegralSerializer {
     }
 
     // Reconstitute a single object, given metadata
-    static Value reconstitute(const long * base,
-                              BitReader & reader, ImmutableMetadata metadata)
+    static Value reconstitute(BitReader & reader,
+                              const long * & child_mem,
+                              ImmutableMetadata metadata)
     {
         return Encoder::decode(reader.read(metadata));
     }
@@ -104,14 +105,14 @@ struct EncodedUnsignedIntegralSerializer {
     }
 
     // How many bits to store a single entry?
-    template<typename Metadata>
-    static Bits bits_per_entry(const Metadata & metadata)
+    static Bits bits_per_entry(const Bits & metadata)
     {
         return metadata;
     }
 
     static void
-    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, long * child_mem,
+                      WorkingMetadata & md, ImmutableMetadata & imd)
     {
         imd = md;
     }
@@ -232,13 +233,15 @@ struct CollectionSerializer : public BaseT {
             prepare(*first, md, i);
     }
 
-    static size_t words_for_base(WorkingMetadata & md, size_t length)
+    static JML_PURE_FN size_t
+    words_for_base(WorkingMetadata & md, size_t length)
     {
         return BitwiseMemoryManager::words_required(bits_per_entry(md),
                                                     length);
     }
 
-    static Bits get_element_offset(int element, const ImmutableMetadata & md)
+    static JML_PURE_FN Bits
+    get_element_offset(int element, const ImmutableMetadata & md)
     {
         return element * bits_per_entry(md);
     }
@@ -246,11 +249,13 @@ struct CollectionSerializer : public BaseT {
     // Extract entry n out of the total
     static T
     extract_from_collection(const long * mem, int n,
-                            ImmutableMetadata md)
+                            ImmutableMetadata md,
+                            size_t length)
     {
         Bits bit_offset = get_element_offset(n, md);
         BitReader reader(mem, bit_offset);
-        return reconstitute(mem, reader, md);
+        const long * child_mem = mem + words_for_base(md, length);
+        return reconstitute(reader, child_mem, md);
     }
 
     // Serialize a homogeneous collection where each of the elements is of
@@ -269,10 +274,14 @@ struct CollectionSerializer : public BaseT {
 
         ImmutableMetadata imd;
 
-        for (int i = 0; first != last;  ++first, ++i)
-            serialize(mem, writer, *first, md, imd, i);
+        size_t length = last - first;
 
-        finish_collection(mem, md, imd);
+        long * child_mem = mem + words_for_base(md, length);
+
+        for (int i = 0; first != last;  ++first, ++i)
+            serialize(child_mem, writer, *first, md, imd, i);
+
+        finish_collection(mem, child_mem, md, imd);
 
         return imd;
     }
@@ -335,136 +344,6 @@ struct BaseArrayEntry<void, void> {
     unsigned length;
     int metadata;
 };
-
-#if 0
-/*****************************************************************************/
-/* BASEANDCOLLECTIONSERIALIZER                                               */
-/*****************************************************************************/
-
-/** Combine two serializers:
-    - a base serializer, that serializes a fixed-width array;
-    - a collection serializer, that serializes some variable length data in some
-      memory that's allocated further on.
-*/
-
-template<typename BaseT,
-         typename BaseSerializerT,
-         typename ElementT,
-         typename ElementSerializerT>
-struct BaseAndCollectionSerializer {
-
-    typedef typename ElementSerializerT::WorkingMetadata
-        ChildWorkingMetadata;
-    typedef typename ElementerializerT::ImmutableMetadata
-        ChildImmutableMetadata;
-
-    // Our base array contains:
-    // - The base data;
-    // - Offset
-    // - Length
-    // - 
-
-    typedef BaseArrayEntry<BaseT, ChildImmutableMetadata>
-        ImmutableMetadataEntry;
-    typedef BaseArrayEntry<BaseT, ChildWorkingMetadata>
-        WorkingMetadataEntry;
-
-    // Type of the serializer to deal with the base data
-    typedef BaseSerializerT BaseSerializer;
-
-    // Type of the immutable metadata to go with this entry
-    typedef ArrayAndData<ImmutableMetadataEntry, unsigned>
-        ImmutableMetadata;
-    
-    typedef CollectionSerializer<ImmutableMetadataEntry>
-        EntrySerializer;
-
-    struct WorkingMetadata : public std::vector<WorkingMetadataEntry> {
-        WorkingMetadata(size_t length)
-            : std::vector<WorkingMetadataEntry>(length),
-              base_md(length)
-        {
-        }
-
-        // how many words in the various entries start
-        size_t data_offset;
-
-        // The total number of words that we need to store
-        size_t total_words;
-
-        // Metadata about how the working entries are serialized
-        typename EntrySerializer::WorkingMetadata entries_md;
-
-        // Metadata about how the base entries are serialized
-        typename BaseSerializer::WorkingMetadata base_md;
-    };
-
-    static WorkingMetadata new_metadata(size_t length)
-    {
-        WorkingMetadata result;
-        return result;
-    }
-
-    // Scan a series of entries to figure out how to efficiently serialize
-    // them.
-    template<typename Iterator>
-    static size_t
-    prepare_collection(Iterator first, Iterator last,
-                       WorkingMetadata & md)
-    {
-        int length = last - first;
-
-        typename WorkingMetadata::Entry & entry = metadata.entries[item_number];
-        entry.length = val.size();
-        entry.offset = metadata.total_words;
-        entry.metadata = ChildSerializer::new_metadata(val.size());
-        size_t nwords = ChildSerializer::
-            prepare_collection(val.begin(), val.end(), entry.metadata);
-        metadata.total_words += nwords;
-
-
-        for (int i = 0; first != last;  ++first, ++i)
-            Base::prepare(*first, md, i);
-
-        return Base::words_required(md, length);
-    }
-
-    // Extract entry n out of the total
-    static T
-    extract_from_collection(const long * mem, int n,
-                            ImmutableMetadata md)
-    {
-        Bits bit_offset = Base::get_element_offset(n, md);
-        BitReader reader(mem, bit_offset);
-        return Base::reconstitute(mem, reader, md);
-    }
-
-    // Serialize a homogeneous collection where each of the elements is of
-    // the same type.  We don't serialize any details of the collection itself,
-    // only its elements.
-    //
-    // Returns an immutable metadata object that can be later used to access
-    // the elements using the extract_from_collection() function.
-    template<typename Iterator>
-    static ImmutableMetadata
-    serialize_collection(long * mem,
-                         Iterator first, Iterator last,
-                         const WorkingMetadata & md)
-    {
-        BitWriter writer(mem);
-        for (int i = 0; first != last;  ++first, ++i)
-            Base::serialize(mem, writer, *first, md, i);
-
-        return Base::to_immutable(md);
-    }
-};
-
-// If there's no child, then we don't need to do all this junk...
-template<typename BaseSerializer>
-struct BaseAndCollectionSerializer<BaseSerializer, void>
-    : public CollectionSerializer<typename BaseSerializer::Value, BaseSerializer> {
-};
-#endif
 
 } // namespace JMVCC
 

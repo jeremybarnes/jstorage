@@ -122,7 +122,8 @@ struct Array {
     T operator [] (int index) const
     {
         return EntrySerializer::extract_from_collection(mem_ + data_.offset,
-                                                        index, data_.metadata);
+                                                        index, data_.metadata,
+                                                        data_.length);
     }
 
     struct const_iterator
@@ -263,7 +264,7 @@ struct ArraySerializer {
 
     template<typename Value>
     static 
-    void serialize(long * mem, BitWriter & writer, const Value & value,
+    void serialize(long * child_mem, BitWriter & writer, const Value & value,
                    WorkingMetadata, ImmutableMetadata, int)
     {
         throw ML::Exception("SERIALIZE");

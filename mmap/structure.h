@@ -19,7 +19,7 @@ namespace JMVCC {
 
 
 /*****************************************************************************/
-/* STRUCTURE                                                                 */
+/* EXTRACTOR                                                                 */
 /*****************************************************************************/
 
 /** Helper class that builds an extractor to extract a given field from a
@@ -77,7 +77,7 @@ struct NullSerializer {
 
     template<typename T>
     static JML_PURE_FN JML_ALWAYS_INLINE
-    void serialize(long * mem, BitWriter & writer, const T & value,
+    void serialize(long * child_mem, BitWriter & writer, const T & value,
                    WorkingMetadata, ImmutableMetadata, int)
     {
     }
@@ -98,7 +98,8 @@ struct NullSerializer {
 
     static void
     JML_PURE_FN JML_ALWAYS_INLINE
-    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, long * child_mem,
+                      WorkingMetadata & md, ImmutableMetadata & imd)
     {
     }
 };
@@ -157,9 +158,11 @@ struct StructureSerializer {
     typedef typename Serializer2::ImmutableMetadata ImmutableMetadata2;
     typedef typename Serializer3::ImmutableMetadata ImmutableMetadata3;
 
-    typedef boost::tuple<WorkingMetadata0, WorkingMetadata1,
-                         WorkingMetadata2, WorkingMetadata3>
-        WorkingMetadata;
+    struct WorkingMetadata
+        : public boost::tuple<WorkingMetadata0, WorkingMetadata1,
+                              WorkingMetadata2, WorkingMetadata3> {
+        unsigned chofs[4];
+    };
 
     typedef boost::tuple<ImmutableMetadata0, ImmutableMetadata1,
                          ImmutableMetadata2, ImmutableMetadata3>
@@ -180,22 +183,26 @@ struct StructureSerializer {
     {
         Serializer0::prepare(Extractor0::extract(value),
                              md.template get<0>(), index);
+        md.chofs[0] = 0;
         Serializer1::prepare(Extractor1::extract(value),
                              md.template get<1>(), index);
+        md.chofs[1] = Serializer1::words_for_children(md.template get<0>());
         Serializer2::prepare(Extractor2::extract(value),
                              md.template get<2>(), index);
+        md.chofs[2]
+            = md.chofs[1]
+            + Serializer1::words_for_children(md.template get<1>());
         Serializer3::prepare(Extractor3::extract(value),
                              md.template get<3>(), index);
+        md.chofs[3]
+            = md.chofs[2]
+            + Serializer1::words_for_children(md.template get<2>());
     }
 
     static size_t words_for_children(WorkingMetadata & md)
     {
-        return 0
-            + Serializer0::words_for_children(md.template get<0>())
-            + Serializer1::words_for_children(md.template get<1>())
-            + Serializer2::words_for_children(md.template get<2>())
-            + Serializer3::words_for_children(md.template get<3>())
-            + 0;
+        return md.chofs[3]
+            + Serializer3::words_for_children(md.template get<3>());
     }
 
     template<typename Metadata>
@@ -210,52 +217,74 @@ struct StructureSerializer {
     }
     
     static Value
-    reconstitute(const long * mem,
-                 BitReader & reader,
+    reconstitute(BitReader & reader,
+                 const long * & child_mem,
                  const ImmutableMetadata & md)
     {
         Value result;
+
+        unsigned chofs0 = 0;
+        ImmutableMetadata0 md0 = md.template get<0>();
         Extractor0::insert(result, Serializer0::
-                           reconstitute(mem, reader, md.template get<0>()));
+                           reconstitute(reader, child_mem + chofs0, reader, md0));
+        unsigned chofs1 = chofs0 + Serializer0::words_for_children(md0);
+
+        ImmutableMetadata1 md1 = md.template get<1>();
         Extractor1::insert(result, Serializer1::
-                           reconstitute(mem, reader, md.template get<1>()));
+                           reconstitute(child_mem + chofs1, reader, md1));
+        unsigned chofs2 = chofs1 + Serializer1::words_for_children(md1);
+
+        ImmutableMetadata2 md2 = md.template get<2>();
         Extractor2::insert(result, Serializer2::
-                           reconstitute(mem, reader, md.template get<2>()));
+                           reconstitute(child_mem + chofs2, reader, md2));
+        unsigned chofs3 = chofs2 + Serializer2::words_for_children(md2);
+
+        ImmutableMetadata3 md3 = md.template get<3>();
         Extractor3::insert(result, Serializer3::
-                           reconstitute(mem, reader, md.template get<3>()));
+                           reconstitute(child_mem + chofs3, reader, md3));
+
         return result;
     }
 
     template<typename ValueT>
     static void
-    serialize(long * mem, BitWriter & writer, const ValueT & value,
+    serialize(BitWriter & writer, long * child_mem, const ValueT & value,
               WorkingMetadata & md, ImmutableMetadata & imd,
               int object_num)
     {
-        Serializer0::serialize(mem, writer, Extractor0::extract(value),
+        Serializer0::serialize(child_mem + md.chofs[0], writer,
+                               Extractor0::extract(value),
                                md.template get<0>(), imd.template get<0>(),
                                object_num);
-        Serializer1::serialize(mem, writer, Extractor1::extract(value),
+        Serializer1::serialize(child_mem + md.chofs[1], writer,
+                               Extractor1::extract(value),
                                md.template get<1>(), imd.template get<1>(),
                                object_num);
-        Serializer2::serialize(mem, writer, Extractor2::extract(value),
+        Serializer2::serialize(child_mem + md.chofs[2], writer,
+                               Extractor2::extract(value),
                                md.template get<2>(), imd.template get<2>(),
                                object_num);
-        Serializer3::serialize(mem, writer, Extractor3::extract(value),
+        Serializer3::serialize(child_mem + md.chofs[3], writer,
+                               Extractor3::extract(value),
                                md.template get<3>(), imd.template get<3>(),
                                object_num);
     }
 
     static void
-    finish_collection(long * mem, WorkingMetadata & md, ImmutableMetadata & imd)
+    finish_collection(long * mem, long * child_mem,
+                      WorkingMetadata & md, ImmutableMetadata & imd)
     {
-        Serializer0::finish_collection(mem, md.template get<0>(),
+        Serializer0::finish_collection(mem, child_mem + md.chofs[0],
+                                       md.template get<0>(),
                                        imd.template get<0>());
-        Serializer1::finish_collection(mem, md.template get<1>(),
+        Serializer1::finish_collection(mem, child_mem + md.chofs[0],
+                                       md.template get<1>(),
                                        imd.template get<1>());
-        Serializer2::finish_collection(mem, md.template get<2>(),
+        Serializer2::finish_collection(mem, child_mem + md.chofs[0],
+                                       md.template get<2>(),
                                        imd.template get<2>());
-        Serializer3::finish_collection(mem, md.template get<3>(),
+        Serializer3::finish_collection(mem, child_mem + md.chofs[0],
+                                       md.template get<3>(),
                                        imd.template get<3>());
     }
 };
