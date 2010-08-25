@@ -144,10 +144,19 @@ struct StructureSerializer {
         Serializer3::finish_prepare(md.template get<3>(), length);
     }
 
-    static size_t words_for_children(WorkingMetadata & md)
+    static size_t words_for_children(const WorkingMetadata & md)
     {
         return md.chofs[3]
             + Serializer3::words_for_children(md.template get<3>());
+    }
+
+    static size_t words_for_children(const ImmutableMetadata & md)
+    {
+        return Serializer0::words_for_children(md.template get<0>())
+            +  Serializer1::words_for_children(md.template get<1>())
+            +  Serializer2::words_for_children(md.template get<2>())
+            +  Serializer3::words_for_children(md.template get<3>())
+            +  0;
     }
 
     template<typename Metadata>

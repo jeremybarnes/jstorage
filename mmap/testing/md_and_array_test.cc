@@ -265,7 +265,7 @@ BOOST_AUTO_TEST_CASE(test_nested1)
     cerr << "v1[3] = " << v1[3] << endl;
 }
 
-#if 0
+#if 1
 BOOST_AUTO_TEST_CASE(test_nested2)
 {
     BitwiseMemoryManager mm;

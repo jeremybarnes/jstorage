@@ -56,7 +56,7 @@ struct PairSerializer {
         Serializer2::finish_prepare(md.second, length);
     }
 
-    static size_t words_for_children(WorkingMetadata & md)
+    static size_t words_for_children(const WorkingMetadata & md)
     {
         size_t words1 = Serializer1::words_for_children(md.first);
         size_t words2 = Serializer2::words_for_children(md.second);

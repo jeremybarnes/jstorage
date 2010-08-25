@@ -151,12 +151,12 @@ struct Array {
     }
 };
 
-template<typename T>
-std::ostream & operator << (std::ostream & stream, const Array<T> & vec)
+template<typename T, typename S>
+std::ostream & operator << (std::ostream & stream, const Array<T, S> & arr)
 {
     stream << "[ ";
-    for (unsigned i = 0;  i < vec.size();  ++i) {
-        stream << vec[i] << " ";
+    for (unsigned i = 0;  i < arr.size();  ++i) {
+        stream << arr[i] << " ";
     }
     return stream << "]";
 }
@@ -208,7 +208,79 @@ struct Serializer<ArrayMetadataEntry<ChildMetadata> >
 
 
 /*****************************************************************************/
-/* SERIALIZER<ARRAY<T> >                                                     */
+/* ARRAYIMMUTABLEMETADATA                                                    */
+/*****************************************************************************/
+
+template<typename ImmutableMetadataEntry>
+struct ArrayImmutableMetadata {
+    typedef Array<ImmutableMetadataEntry> Entries;
+    Entries entries;
+    size_t total_child_words;
+};
+
+template<typename ImmutableMetadataEntry>
+std::ostream &
+operator << (std::ostream & stream,
+             const ArrayImmutableMetadata<ImmutableMetadataEntry> & md)
+{
+    return stream << "(entries: " << md.entries
+                  << ", total_child_words: " << md.total_child_words
+                  << ")";
+}
+
+template<typename ImmutableMetadataEntry>
+struct Serializer<ArrayImmutableMetadata<ImmutableMetadataEntry> >
+    : public StructureSerializer<ArrayImmutableMetadata<ImmutableMetadataEntry>,
+                                 Extractor<ArrayImmutableMetadata<ImmutableMetadataEntry>,
+                                           Array<ImmutableMetadataEntry>,
+                                           &ArrayImmutableMetadata<ImmutableMetadataEntry>::entries>,
+                                 Extractor<ArrayImmutableMetadata<ImmutableMetadataEntry>,
+                                           size_t,
+                                           &ArrayImmutableMetadata<ImmutableMetadataEntry>::total_child_words> > {
+};
+
+
+/*****************************************************************************/
+/* ARRAYWORKING METADATA                                                     */
+/*****************************************************************************/
+
+template<typename ChildSerializer, typename EntrySerializer>
+struct ArrayWorkingMetadata {
+    typedef typename ChildSerializer::WorkingMetadata ChildWorkingMetadata;
+    typedef typename ChildSerializer::ImmutableMetadata ChildImmutableMetadata;
+
+    typedef ArrayMetadataEntry<ChildWorkingMetadata> WorkingMetadataEntry;
+    typedef ArrayMetadataEntry<ChildImmutableMetadata> ImmutableMetadataEntry;
+
+    ArrayWorkingMetadata()
+        : total_child_words(0)
+    {
+    }
+
+    ArrayWorkingMetadata(size_t length)
+        : entries(length), imm_entries(length), total_child_words(0)
+    {
+    }
+    
+    std::vector<WorkingMetadataEntry> entries;
+    std::vector<ImmutableMetadataEntry> imm_entries;
+    
+    size_t total_child_words;
+    
+    typename EntrySerializer::WorkingMetadata entries_md;
+};
+
+template<typename ChildSerializer, typename EntrySerializer>
+std::ostream &
+operator << (std::ostream & stream,
+             const ArrayWorkingMetadata<ChildSerializer, EntrySerializer> & md)
+{
+    return stream << "ArrayWorkingMetadata";
+}
+
+
+/*****************************************************************************/
+/* ARRAYSERIALIZER                                                           */
 /*****************************************************************************/
 
 /** How to serialize an array of arrays.
@@ -229,26 +301,11 @@ struct ArraySerializer {
 
     typedef CollectionSerializer<ImmutableMetadataEntry> EntrySerializer;
 
-    struct WorkingMetadata {
-        WorkingMetadata(size_t length)
-            : entries(length), imm_entries(length), total_child_words(0)
-        {
-        }
-
-        std::vector<WorkingMetadataEntry> entries;
-        std::vector<ImmutableMetadataEntry> imm_entries;
-
-        size_t total_child_words;
-
-        typename EntrySerializer::WorkingMetadata entries_md;
-    };
+    typedef ArrayWorkingMetadata<ChildSerializer, EntrySerializer>
+        WorkingMetadata;
 
     // Type of the immutable metadata to go with this entry
-    struct ImmutableMetadata {
-        typedef Array<ImmutableMetadataEntry> Entries;
-        Entries entries;
-        size_t total_child_words;
-    };
+    typedef ArrayImmutableMetadata<ImmutableMetadataEntry> ImmutableMetadata;
     
     static WorkingMetadata new_metadata(size_t length)
     {
@@ -280,10 +337,10 @@ struct ArraySerializer {
 
         size_t child_words = child_base_words + child_child_words;
 
-        using namespace std;
-        cerr << "child " << item_number << " = " << value << " child_words = "
-             << child_words << " child metadata = "
-             << metadata.entries[item_number].metadata << endl;
+        //using namespace std;
+        //cerr << "child " << item_number << " = " << value << " child_words = "
+        //     << child_words << " child metadata = "
+        //     << metadata.entries[item_number].metadata << endl;
 
         metadata.entries[item_number].offset = metadata.total_child_words;
         metadata.entries[item_number].length = value.size();
@@ -297,11 +354,11 @@ struct ArraySerializer {
             prepare_collection(md.entries.begin(), md.entries.end(),
                                md.entries_md);
  
-        using namespace std;
-        cerr << "array: total_child_words = " << md.total_child_words
-             << endl;
-        cerr << "array: metadata.entries = " << md.entries
-             << endl;
+        //using namespace std;
+        //cerr << "array: total_child_words = " << md.total_child_words
+        //     << endl;
+        //cerr << "array: metadata.entries = " << md.entries
+        //     << endl;
        
         size_t md_child_words = EntrySerializer::
             words_for_children(md.entries_md);

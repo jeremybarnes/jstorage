@@ -81,6 +81,12 @@ struct NullSerializer {
     }
 };
 
+std::ostream &
+operator << (std::ostream & stream, Nothing)
+{
+    return stream;
+}
+
 template<>
 struct Serializer<Nothing> : public NullSerializer {
 };
